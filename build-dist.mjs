@@ -116,6 +116,11 @@ mkdirSync(join(OUT, '.dsh-home'), { recursive: true })
 const patchSrc = readFileSync(join(ROOT, '.dsh-home', 'cordis.patch.yml'), 'utf8')
 writeFileSync(join(OUT, '.dsh-home', 'cordis.patch.yml'),
   patchSrc.replaceAll(`process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'`, `process.env.AR_DEVICE_TOKEN || ''`))
+// ★随包发我们自己的 agent preset(.dsh-home/.agent-presets/<id>/agent.cordis.yml)。
+//   人格、子 agent、web_fetch 都在 preset 层;不带它的话产品会退回上游 standard
+//   预设的"编码 agent"人格。$DSH_HOME 是 agent-presets 的用户根,无需改 dsh。
+cpSync(join(ROOT, '.dsh-home', '.agent-presets'), join(OUT, '.dsh-home', '.agent-presets'), { recursive: true })
+
 for (const f of ['knevo-login.mjs', 'knevo-update.mjs', 'KNEVO-README.md']) {
   if (existsSync(join(ROOT, f))) cpSync(join(ROOT, f), join(OUT, f))
 }

@@ -64,6 +64,40 @@
     - id: web-fetch-http
       name: '@deepseek-ai/dsh-web-fetch-http'
 
+# 产品化:默认 agent 组成换成我们自己的 preset(随包发在 .dsh-home/.agent-presets/knevo)。
+# 人格、子 agent、web_fetch 都在 preset 层 —— 上游 standard 预设是"编码 agent"人格
+# 且把 web_fetch 关了,直接用它的话产品就是"接了我们 provider 的 dsh"。
+- id: agent-presets
+  config:
+    default: knevo
+
+# 去掉 dsh 自带的身份句("You are an AI agent powered by DeepSeek Harness."),
+# 人格由 preset 的 persona 提供(order 0),身份句在 order -100。
+- id: system-prompt
+  config:
+    includeHarnessIdentity: false
+    # 与 preset 的 persona 同一份文本:preset 生效时由 preset 覆盖(它 shadow 部署默认),
+    # 不走 roster 的入口(如 headless)则由这里兜底 —— 否则会退回模型自己的通用身份。
+    persona: |-
+      You are Oryx-RE, Knevo's long-horizon research assistant, running on {{model}}. Your working directory is {{cwd}}.
+
+      研究纪律(高于一切):
+      - 结论必须有来源。用 web_search 检索、web_fetch 抓正文核实;引用只能是你**真实抓取过**的链接,绝不凭记忆编造 URL、标题或数字。
+      - 交叉验证。关键事实至少两个独立来源;来源冲突时把分歧写出来,不要偷偷选一个。
+      - 诚实标注不确定。查不到就说查不到,不要用推测填补证据缺口。
+      - 时间敏感的问题先确认"最新"的时点,别把旧结论当现状。
+
+      工作方式:
+      - 长任务先用 todo_write 拆解,按步推进;目标状态用 goal 工具维护,不靠对话记忆。
+      - 可并行、可隔离的子问题用 subagent 分工(各自带回证据与来源),你负责汇总与裁决。
+      - 重要发现用 research_memory_write 记入长期记忆(带来源 URL),后续会话会自动检索回来。
+      - 下重要结论、交付报告前,用 peer_review 请独立模型审一遍,并按意见修正。
+
+      产出:
+      - 报告、数据、图表一律写进工作区文件(write/edit 工具),路径用工作区相对路径,不要用本机绝对路径。
+      - 正文里给出可点击的真实引用链接;必要时附来源清单。
+      - 回复用用户使用的语言;先给结论,再给依据,最后给不确定性与后续建议。
+
 # 接线②: 会话事件流上云。sessionTelemetry 是单例,默认 otel backend 占了,先 disable。
 - id: session-telemetry-otel
   disabled: true
