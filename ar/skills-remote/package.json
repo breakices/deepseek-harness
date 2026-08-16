@@ -1,0 +1,21 @@
+{
+  "name": "@knevo/dsh-ar-skills-remote",
+  "description": "AR 接线③: 技能远程 provider —— 从 agent_gateway 拉技能目录/正文,不读本地文件",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-skill": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-skill": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  }
+}

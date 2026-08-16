@@ -1,0 +1,19 @@
+{
+  "name": "@knevo/dsh-ar-hello",
+  "description": "AR source-migration spike: minimal out-of-tree plugin proving @knevo rows mount in source mode",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-commands": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-commands": "workspace:^"
+  }
+}

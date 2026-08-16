@@ -38,3 +38,13 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# AR spike 运行态 / 机密 —— 绝不入库(设备 token、会话、日志、生成物)
+.dsh-home/.device-token
+.dsh-home/.device-id
+.dsh-home/sessions/
+.dsh-home/*.log
+.dsh-home/*.bak
+.dsh-home/.trace-spike/
+.dsh-home/credentials*
+generated/

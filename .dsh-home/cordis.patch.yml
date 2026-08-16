@@ -1,0 +1,100 @@
+# AR spike home layer (isolated DSH_HOME — never the daily ~/.dsh).
+# Mount the out-of-tree @knevo hello plugin to prove the AR plugin layer loads.
+- insert:
+    - id: ar-hello
+      name: '@knevo/dsh-ar-hello'
+
+# Pin the BROWSE directory-picker pair (same fix as the daily ~/.dsh instance):
+# the workspace file tree/preview reads are served only under the browse
+# capability, and on win32+loopback the auto chooser resolves to native —
+# without this the file tree shows 读取失败. Pinning = disable the chooser row
+# and compose the interaction pair directly.
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-auto'
+  disabled: true
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
+# 接线①: 主 LLM 通道换轨到 AR agent_gateway 代理(本机 ar_backend:8000)。
+# adapter 把 apiKeyEnv 解析出的值(AR_DEVICE_TOKEN=ar-spike-2026)当 Bearer 发给
+# baseURL/chat/completions —— 正是 gateway 的 device_auth 期望的设备 token。
+# 真实 DeepSeek key 只在 gateway 侧(ar_backend .env.local)。
+- id: llm-deepseek
+  config:
+    baseURL: https://dev.ar.knevo.ai/api/agent/v1/llm/deepseek
+    apiKeyEnv: AR_DEVICE_TOKEN
+
+# 联网搜索换轨: base bundle 把 web 接缝 pin 到 deepseek-official 官方 provider。
+# 改选我们的 ar-remote(打 gateway /search,平台持搜索 key);官方 provider 禁掉,
+# 避免两个可用 provider 触发 WEB_PROVIDER_AMBIGUOUS。
+- id: web
+  config:
+    searchProvider: ar-remote
+    fetchProvider: http
+- id: web-search-deepseek
+  disabled: true
+# 启用 web_fetch:base 里 tool-web fetch:false 且未挂任何 fetch provider。
+# 开 fetch + 挂 dsh 原生 web-fetch-http(在设备本地/用户 IP 抓公网页,provider id=http)。
+# 内网/登录态/本地地址天然只能设备抓;公网页也走设备(爆炸半径自包含、反爬友好)。
+- id: tool-web
+  config:
+    fetch: true
+- insert:
+    - id: web-fetch-http
+      name: '@deepseek-ai/dsh-web-fetch-http'
+
+# 接线②: 会话事件流上云。sessionTelemetry 是单例,默认 otel backend 占了,先 disable。
+- id: session-telemetry-otel
+  disabled: true
+# 注册 @knevo telemetry backend(session-telemetry seam),每个会话事件按 seq 水位
+# POST 到 agent_telemetry。数据一律上云。
+- insert:
+    - id: ar-telemetry
+      name: '@knevo/dsh-ar-telemetry'
+      config:
+        endpoint: https://dev.ar.knevo.ai/api/agent/v1/trace/events
+        token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
+# 接线③: 技能远程 provider —— 从 agent_gateway 拉技能目录/正文(与本地 skill-filesystem 共存)。
+    - id: ar-skills-remote
+      name: '@knevo/dsh-ar-skills-remote'
+      config:
+        baseUrl: https://dev.ar.knevo.ai/api/agent/v1
+        token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
+# 接线③: 记忆注入 —— pre-step 拉 /memories/rank，把相关记忆作 user 消息注入本回合。
+    - id: ar-memory
+      name: '@knevo/dsh-ar-memory'
+      config:
+        endpoint: https://dev.ar.knevo.ai/api/agent/v1/memories/rank
+        token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
+# 生图工具: generate_image → gateway /images → 写工作区 → 文件区预览
+    - id: ar-image
+      name: '@knevo/dsh-ar-image'
+      config:
+        endpoint: https://dev.ar.knevo.ai/api/agent/v1/images
+        token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
+# 联网搜索 provider: dsh 原生 tool-web 的 web_search → ctx.web → 本 provider → gateway /search
+# （平台持 Tavily/火山 key + 计量）。web_fetch 走 dsh 原生 web-fetch-http（设备/用户 IP），不在此。
+    - id: ar-web-search
+      name: '@knevo/dsh-ar-web-search'
+      config:
+        baseUrl: https://dev.ar.knevo.ai/api/agent/v1
+        token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
+# peer_review: 拼上下文 → 调统一 /llm 的 review channel(平台持 grok key,跨模型独立审)。
+    - id: ar-peer-review
+      name: '@knevo/dsh-ar-peer-review'
+      config:
+        endpoint: https://dev.ar.knevo.ai/api/agent/v1/llm/review/chat/completions
+        token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
+        model: x-ai/grok-4.5
+# 接线④: compaction —— ctx.compaction 单例,disable 默认 basic,装 AR 提示词版。
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  disabled: true
+- insert:
+    - id: ar-compact
+      name: '@knevo/dsh-ar-compact'
+    - id: ar-goals-judge
+      name: '@knevo/dsh-ar-goals-judge'

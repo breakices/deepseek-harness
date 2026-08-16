@@ -1,6 +1,8 @@
 packages:
   - vendor/*
   - packages/*/*
+  # AR source-migration spike: out-of-tree @knevo plugin area (DEVIATIONS.md #1).
+  - ar/*
   # The Landlock launcher is developed with its harness consumers but keeps
   # its native build and publication scripts under native/landlock-run.
   - native/landlock-run

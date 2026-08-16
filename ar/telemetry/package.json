@@ -1,0 +1,21 @@
+{
+  "name": "@knevo/dsh-ar-telemetry",
+  "description": "AR 接线②: 订阅 dsh session 事件流,按 seq 水位异步上传到 agent_telemetry 端点",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-session-telemetry": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-session-telemetry": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@knevo/dsh-ar-web-search",
+  "description": "AR 接线: web_search provider —— 实现 dsh ctx.web 接缝,打 agent_gateway /search,平台持搜索 key + 计量。web_fetch 走 dsh 原生 web-fetch-http(设备/用户 IP),本包不涉及。",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-web": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-web": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  }
+}

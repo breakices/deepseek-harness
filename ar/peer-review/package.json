@@ -1,0 +1,21 @@
+{
+  "name": "@knevo/dsh-ar-peer-review",
+  "description": "AR 接线: peer_review 工具 —— 拼审阅上下文 → 调统一 /llm 的 review channel(平台持 grok/gemini key,跨模型独立审)。不做独立端点,复用 /llm。",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  }
+}
