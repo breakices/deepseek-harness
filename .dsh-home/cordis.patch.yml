@@ -27,6 +27,15 @@
     baseURL: https://dev.ar.knevo.ai/api/agent/v1/llm/deepseek
     apiKeyEnv: AR_DEVICE_TOKEN
 
+# 产品形态锁死模型/供应商:LLM 一律走我们的网关(平台 key + per-user 计量),
+# 不给用户改模型或自定义供应商 —— 关掉设置里的「模型」页与对话里的模型选择器。
+# 这只是产品面:设备归用户所有,settings.yaml 仍可手改,真正的边界是网关侧的
+# 模型白名单(AGENT_GATEWAY_ALLOWED_MODELS,非白名单 400)。
+- id: ui-settings-models
+  disabled: true
+- id: ui-model-selection
+  disabled: true
+
 # 主循环模型对齐 AR 产品:base 的 agent-default-model 钉的是 deepseek-v4-flash,
 # 研究产品主模型是 v4-pro(实测设备端 turns 都记在 flash 上,质量掉档)。
 # 注意:此行 config 覆写不是 merge,schema 要求 provider+model 都给全,缺 provider 会
