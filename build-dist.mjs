@@ -28,6 +28,10 @@ if (!_esDir) throw new Error('找不到 esbuild(node_modules/.pnpm/esbuild@*)—
 const { build } = require(join(_pnpm, _esDir, 'node_modules', 'esbuild'))
 const VERSION = process.argv[2] || '0.1.0'
 const DSH_VERSION = '0.1.0-rc.6'
+// 前端资源由**我们托管**:构建时取发布版、改品牌、随包发,再用 pnpm overrides 指过去。
+// 这样用户装依赖时解析到我们的副本,不从 npm 拉原装(品牌不经第三方)。
+const FE_VERSION = '0.1.0-rc.6'
+const BRAND = { title: 'Knevo', short: 'Knevo' }
 
 // Node 版本闸的脚本体(双引号 JS 字符串承载,内部只用单引号,避免与两种 shell 的引号打架)。
 const NODE_GUARD = "const v=process.versions.node.split('.').map(Number); "
@@ -93,6 +97,10 @@ writeFileSync(join(OUT, 'package.json'), JSON.stringify({
 //   workspace —— 所以启动器不再需要 --ignore-workspace(那反而会让本文件被忽略)。
 writeFileSync(join(OUT, 'pnpm-workspace.yaml'), [
   'packages: []',
+  '',
+  '# 前端资源用我们随包发的副本(已改品牌),不从 npm 拉上游原装。',
+  'overrides:',
+  "  '@deepseek-ai/dsh-web-frontend': 'file:./vendor/dsh-web-frontend'",
   '',
   '# 只放行真正需要的构建脚本,其余一律拒绝(deny by default)。',
   'allowBuilds:',
@@ -205,6 +213,54 @@ writeFileSync(join(OUT, 'knevo.sh'), [
   'export AR_DEVICE_TOKEN="$(cat "$DSH_HOME/.device-token")"',
   'echo "启动 Knevo(连接 dev.ar.knevo.ai),首次启动约 1-3 分钟,好了用浏览器开 http://127.0.0.1:3180 ..."',
   './node_modules/.bin/dsh --profile web --port 3180', '',
+].join('\n'))
+
+// 4.4) 自托管并改品牌的前端资源(MIT:上游 LICENSE 随包保留,见 THIRD-PARTY-NOTICES.txt)。
+//   只改可见品牌文本(标题 / PWA 名称);wordmark 图形按产品决定暂留上游原样。
+const feDir = join(OUT, 'vendor', 'dsh-web-frontend')
+const feCache = join(ROOT, '.fe-cache')
+mkdirSync(feCache, { recursive: true })
+const feTgz = `deepseek-ai-dsh-web-frontend-${FE_VERSION}.tgz`
+if (!existsSync(join(feCache, feTgz))) {
+  console.log('[build] 拉取前端发布包…')
+  execSync(`npm pack @deepseek-ai/dsh-web-frontend@${FE_VERSION}`, { cwd: feCache, stdio: 'inherit' })
+}
+mkdirSync(feDir, { recursive: true })
+// tar 在 Windows 上会把 `-C D:\...` 的盘符当远程主机 —— 把包拷进目标目录用相对路径解。
+cpSync(join(feCache, feTgz), join(feDir, feTgz))
+execSync(`tar --force-local -xzf "${feTgz}" --strip-components=1`, { cwd: feDir, stdio: 'inherit' })
+rmSync(join(feDir, feTgz), { force: true })
+
+// 改品牌:页面标题 + PWA 名称
+const feIndex = join(feDir, 'dist', 'index.html')
+writeFileSync(feIndex, readFileSync(feIndex, 'utf8')
+  .replace(/<title>[^<]*<\/title>/, `<title>${BRAND.title}</title>`))
+const feManifest = join(feDir, 'dist', 'manifest.webmanifest')
+if (existsSync(feManifest)) {
+  const mf = JSON.parse(readFileSync(feManifest, 'utf8'))
+  if (mf.name) mf.name = BRAND.title
+  if (mf.short_name) mf.short_name = BRAND.short
+  writeFileSync(feManifest, JSON.stringify(mf, null, 2))
+}
+// 校验品牌真的改到了(改名失败就别发)
+if (!readFileSync(feIndex, 'utf8').includes(`<title>${BRAND.title}</title>`)) {
+  throw new Error('[build] 前端标题未改成功,中止')
+}
+console.log('[build] 前端资源已自托管并改品牌')
+
+// 第三方许可声明(MIT 要求随副本分发版权与许可声明;界面无需出现)
+const upstreamLicense = existsSync(join(feDir, 'LICENSE')) ? readFileSync(join(feDir, 'LICENSE'), 'utf8') : ''
+writeFileSync(join(OUT, 'THIRD-PARTY-NOTICES.txt'), [
+  'Knevo 客户端包含以下第三方组件。',
+  '',
+  '── @deepseek-ai/dsh 及其组件(含 dsh-web-frontend;本包内含其修改副本)──',
+  '本产品分发的前端资源基于 @deepseek-ai/dsh-web-frontend 修改而来。',
+  '原始项目按 MIT 许可发布,许可与版权声明如下:',
+  '',
+  upstreamLicense.trim(),
+  '',
+  '其余依赖的许可证随各自的 npm 包分发,见安装后的 node_modules 目录。',
+  '',
 ].join('\n'))
 
 // 4.5) ★泄密闸:分发包是**公开可下载**的(/releases/download 无鉴权),任何明文 token
