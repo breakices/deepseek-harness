@@ -1,6 +1,6 @@
 # DEVIATIONS — AR spike 对上游文件的改动台账
 
-本副本（`ar_deepseek_harness`，分支 `ar/source-migration`，基于 fork 的 `feat/workspace-file-tree`）是 AR 功能迁移的源码 spike。每处**上游文件**改动记一行：文件、为什么、终态怎么收敛（对照 `../AR-DSH-LOCAL-AGENT-DESIGN.md` v3.2）。`ar/` 目录与 `.dsh-home/` 是新增区，不算 deviation。
+本副本（`ar_deepseek_harness`，分支 `feat/ar-research-full`，基于 fork 的 `feat/workspace-file-tree`）是 AR 功能迁移的源码 spike。每处**上游文件**改动记一行：文件、为什么、终态怎么收敛（对照工作区根 `../AR-DSH-STATUS.md` 与 `../AR-DSH-ARCHITECTURE-MAP.md`）。`ar/` 目录与 `.dsh-home/` 是新增区，不算 deviation。
 
 | # | 文件 | 改了什么 | 为什么 | 终态收敛 |
 |---|---|---|---|---|
