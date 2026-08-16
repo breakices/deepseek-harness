@@ -73,47 +73,71 @@ writeFileSync(join(OUT, 'package.json'), JSON.stringify({
     '@deepseek-ai/dsh-web-fetch-http': '0.0.1-rc.5',
     ...fileDeps,
   },
+  // pnpm 默认忽略依赖的 postinstall(安全策略)——但 dsh-subprocess-local 的
+  // ensure-spawn-helper 等必须跑,否则设备侧 shell/子进程工具坏。显式放行这几个。
+  pnpm: {
+    onlyBuiltDependencies: [
+      '@deepseek-ai/dsh-subprocess-local', 'node-pty', 'koffi', 'protobufjs', '@google/genai',
+    ],
+  },
 }, null, 2))
 
 // 3) profile 接线 + 启动器(从工作副本拷,过滤掉运行态/密钥)
 mkdirSync(join(OUT, '.dsh-home'), { recursive: true })
-cpSync(join(ROOT, '.dsh-home', 'cordis.patch.yml'), join(OUT, '.dsh-home', 'cordis.patch.yml'))
-for (const f of ['knevo-login.mjs', 'KNEVO-README.md']) {
+// ★分发版剥掉 token 的 spike fallback:'ar-spike-2026' 会让「env 没注入」这种故障
+//   静默降级成「用默认账户计费」——C 端必须 fail-loud(空 token → 明确 401/工具不可用)。
+const patchSrc = readFileSync(join(ROOT, '.dsh-home', 'cordis.patch.yml'), 'utf8')
+writeFileSync(join(OUT, '.dsh-home', 'cordis.patch.yml'),
+  patchSrc.replaceAll(`process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'`, `process.env.AR_DEVICE_TOKEN || ''`))
+for (const f of ['knevo-login.mjs', 'knevo-update.mjs', 'KNEVO-README.md']) {
   if (existsSync(join(ROOT, f))) cpSync(join(ROOT, f), join(OUT, f))
 }
 
-// 4) 分发版启动器(与 spike 的 knevo.cmd 不同:用装好的本地 dsh,不用 monorepo)
+// 4) 分发版启动器。要点:
+//    - 装依赖用 pnpm(npx 拉取;实测 npm 在部分代理环境静默装不出 node_modules,pnpm 稳)
+//    - **不清用户代理**:npm/pnpm 拉包可能需要它(中国网络);dsh 运行时用 undici fetch,
+//      本就不读 env 代理,直连 dev 公网 —— 两边各取所需,不动用户环境。
+//    - token 有效性检查(--check):30 天过期/被吊销 → 触发重登录,而不是运行期哑 401。
 writeFileSync(join(OUT, 'knevo.cmd'), [
   '@echo off',
-  'rem Knevo 客户端启动器（分发版）。首次会 npm install 拉 dsh runtime + 登录换设备 token。',
+  'rem Knevo 客户端启动器(Windows)。首次:装依赖(几分钟)+ 登录换设备 token。',
   'setlocal',
   'set DSH_HOME=%~dp0.dsh-home',
   'cd /d %~dp0',
-  'set HTTP_PROXY=', 'set HTTPS_PROXY=', 'set http_proxy=', 'set https_proxy=',
-  'if not exist node_modules ( echo 首次安装依赖... & npm install --no-audit --no-fund )',
-  'if not exist "%DSH_HOME%\\.device-token" (',
-  '  echo 首次使用请登录（未注册先到 https://dev.ar.knevo.ai 注册）。',
+  'if not exist node_modules (',
+  '  echo 首次安装依赖,约需几分钟...',
+  '  call npx -y pnpm@11.7.0 install --ignore-workspace || ( echo 依赖安装失败,请检查网络后重试。 & exit /b 1 )',
+  ')',
+  'if exist "%DSH_HOME%\\.device-token" (',
+  '  node "%~dp0knevo-login.mjs" --check || (',
+  '    echo 登录已过期,请重新登录。',
+  '    del "%DSH_HOME%\\.device-token"',
+  '    node "%~dp0knevo-login.mjs"',
+  '  )',
+  ') else (',
+  '  echo 首次使用请登录(未注册先到 https://dev.ar.knevo.ai 注册)。',
   '  node "%~dp0knevo-login.mjs"',
   ')',
-  'if not exist "%DSH_HOME%\\.device-token" ( echo 登录未完成 & exit /b 1 )',
+  'if not exist "%DSH_HOME%\\.device-token" ( echo 登录未完成,已退出。 & exit /b 1 )',
   'set /p AR_DEVICE_TOKEN=<"%DSH_HOME%\\.device-token"',
-  'echo 启动 Knevo（连接 dev.ar.knevo.ai）...',
+  'echo 启动 Knevo(连接 dev.ar.knevo.ai),首次启动约 1-3 分钟,好了用浏览器开 http://127.0.0.1:3180 ...',
   'node_modules\\.bin\\dsh --profile web --port 3180',
   'endlocal', '',
 ].join('\r\n'))
 writeFileSync(join(OUT, 'knevo.sh'), [
   '#!/usr/bin/env bash',
-  '# Knevo 客户端启动器（分发版,macOS/Linux）。',
+  '# Knevo 客户端启动器(macOS/Linux)。首次:装依赖(几分钟)+ 登录换设备 token。',
   'set -e; cd "$(dirname "$0")"',
   'export DSH_HOME="$PWD/.dsh-home"',
-  'unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy',
-  '[ -d node_modules ] || { echo "首次安装依赖..."; npm install --no-audit --no-fund; }',
-  'if [ ! -f "$DSH_HOME/.device-token" ]; then',
-  '  echo "首次使用请登录（未注册先到 https://dev.ar.knevo.ai 注册）。"; node ./knevo-login.mjs',
+  '[ -d node_modules ] || { echo "首次安装依赖,约需几分钟..."; npx -y pnpm@11.7.0 install --ignore-workspace; }',
+  'if [ -f "$DSH_HOME/.device-token" ]; then',
+  '  node ./knevo-login.mjs --check || { echo "登录已过期,请重新登录。"; rm -f "$DSH_HOME/.device-token"; node ./knevo-login.mjs; }',
+  'else',
+  '  echo "首次使用请登录(未注册先到 https://dev.ar.knevo.ai 注册)。"; node ./knevo-login.mjs',
   'fi',
-  '[ -f "$DSH_HOME/.device-token" ] || { echo "登录未完成"; exit 1; }',
+  '[ -f "$DSH_HOME/.device-token" ] || { echo "登录未完成,已退出。"; exit 1; }',
   'export AR_DEVICE_TOKEN="$(cat "$DSH_HOME/.device-token")"',
-  'echo "启动 Knevo（连接 dev.ar.knevo.ai）..."',
+  'echo "启动 Knevo(连接 dev.ar.knevo.ai),首次启动约 1-3 分钟,好了用浏览器开 http://127.0.0.1:3180 ..."',
   './node_modules/.bin/dsh --profile web --port 3180', '',
 ].join('\n'))
 

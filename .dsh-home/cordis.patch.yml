@@ -27,6 +27,12 @@
     baseURL: https://dev.ar.knevo.ai/api/agent/v1/llm/deepseek
     apiKeyEnv: AR_DEVICE_TOKEN
 
+# 主循环模型对齐 AR 产品:base 的 agent-default-model 钉的是 deepseek-v4-flash,
+# 研究产品主模型是 v4-pro(实测设备端 turns 都记在 flash 上,质量掉档)。
+- id: agent-default-model
+  config:
+    model: deepseek-v4-pro
+
 # 联网搜索换轨: base bundle 把 web 接缝 pin 到 deepseek-official 官方 provider。
 # 改选我们的 ar-remote(打 gateway /search,平台持搜索 key);官方 provider 禁掉,
 # 避免两个可用 provider 触发 WEB_PROVIDER_AMBIGUOUS。

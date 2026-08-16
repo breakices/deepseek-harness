@@ -94,11 +94,16 @@ export function apply(ctx: Context, config: Config): void {
     },
   }))
 
+  // ★按「用户最新输入」去重:agent/pre-step 每个 step(每次 LLM 迭代)都会触发,
+  //   一次长调研几十个 step —— 不去重就是每步一次 /memories/rank(服务端一次 lite LLM),
+  //   纯浪费(同一轮里用户输入没变,排序结果也不会变)。同 query 只查一次。
+  let lastAttemptedQuery = ''
   ctx.on('agent/pre-step', async ({ messages, signal }, next): Promise<PreStepDecision> => {
     const decision = await next() // waterfall:先委托拿默认 decision(已含装配的 context)
     if (decision.kind === 'reject' || signal.aborted) return decision
     const query = lastUserText(messages as readonly UserMessage[])
-    if (query.length === 0) return decision
+    if (query.length === 0 || query === lastAttemptedQuery) return decision
+    lastAttemptedQuery = query   // 失败也标记:云端故障时不能每步重试放大
     const memory = await rank(config.endpoint, config.token, query, signal)
     signal.throwIfAborted()
     if (memory.length === 0) return decision

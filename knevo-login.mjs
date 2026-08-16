@@ -38,6 +38,22 @@ async function prompt(q, { silent = false } = {}) {
 }
 
 async function main() {
+  // --check:校验已存 token 是否仍有效(过期/被吊销 → exit 1,launcher 据此触发重登录)。
+  // 用 /skills/catalog 当探针:带鉴权、无 LLM/搜索成本。
+  if (process.argv.includes('--check')) {
+    if (!existsSync(TOKEN_FILE)) process.exit(1)
+    const token = readFileSync(TOKEN_FILE, 'utf8').trim()
+    try {
+      const res = await fetch(`${AR_BASE}/skills/catalog`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      process.exit(res.status === 401 || res.status === 403 ? 1 : 0)
+    } catch {
+      // 网络不通 ≠ token 失效:放行启动,让运行期错误自己暴露,避免离线时死循环要登录
+      process.exit(0)
+    }
+  }
+
   console.log(`Knevo 设备登录（连接 ${AR_BASE}）`)
   const email = await prompt('邮箱: ')
   const password = await prompt('密码: ', { silent: true })
