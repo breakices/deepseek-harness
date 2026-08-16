@@ -29,8 +29,11 @@
 
 # 主循环模型对齐 AR 产品:base 的 agent-default-model 钉的是 deepseek-v4-flash,
 # 研究产品主模型是 v4-pro(实测设备端 turns 都记在 flash 上,质量掉档)。
+# 注意:此行 config 覆写不是 merge,schema 要求 provider+model 都给全,缺 provider 会
+# ValidationError 直接 boot 失败(0.2.1 就栽在这)。
 - id: agent-default-model
   config:
+    provider: deepseek-official
     model: deepseek-v4-pro
 
 # 联网搜索换轨: base bundle 把 web 接缝 pin 到 deepseek-official 官方 provider。
