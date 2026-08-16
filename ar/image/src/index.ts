@@ -32,6 +32,24 @@ export const Config: z<Config> = z.object({
   token: z.string().required(),
 })
 
+/** 把网关结构化错误翻成人话(402 配额闸/401 登录失效/429 限速)。 */
+async function describeError(res: Response, what: string): Promise<string> {
+  let detail: any
+  try {
+    detail = ((await res.json()) as any)?.detail
+  } catch {
+    /* 非 JSON */
+  }
+  const msg = typeof detail === 'string' ? detail : detail?.message
+  if (res.status === 402) {
+    const bal = detail?.balance
+    return `${what}失败:${msg || '积分不足,请充值后继续'}${typeof bal === 'number' ? `(当前余额 ${bal})` : ''}`
+  }
+  if (res.status === 429) return `${what}失败:${msg || '请求过于频繁,请稍后再试'}`
+  if (res.status === 401 || res.status === 403) return `${what}失败:设备登录已失效,请重新运行启动器登录。`
+  return `${what}失败:HTTP ${res.status}${msg ? ` — ${msg}` : ''}`
+}
+
 export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: 'generate_image',
@@ -61,7 +79,7 @@ export function apply(ctx: Context, config: Config): void {
         body: JSON.stringify({ prompt: args.prompt }),
         signal: exec.signal,
       })
-      if (!res.ok) throw new Error(`生图端点失败: HTTP ${res.status}`)
+      if (!res.ok) throw new Error(await describeError(res, '生成图片'))
       const data = (await res.json()) as { ok?: boolean; b64?: string }
       if (!data.ok || !data.b64) throw new Error('生图端点返回无效')
       const bytes = Buffer.from(data.b64, 'base64')

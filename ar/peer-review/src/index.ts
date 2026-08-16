@@ -47,6 +47,24 @@ const REVIEWER_SYSTEM = [
   '若材料在某方面确实扎实,简短肯定即可,不要凑数。默认从怀疑出发。',
 ].join('\n')
 
+/** 把网关结构化错误翻成人话(402 配额闸/401 登录失效/429 限速)。见 web-search 同名注释。 */
+async function describeError(res: Response, what: string): Promise<string> {
+  let detail: any
+  try {
+    detail = ((await res.json()) as any)?.detail
+  } catch {
+    /* 非 JSON */
+  }
+  const msg = typeof detail === 'string' ? detail : detail?.message
+  if (res.status === 402) {
+    const bal = detail?.balance
+    return `${what}失败:${msg || '积分不足,请充值后继续'}${typeof bal === 'number' ? `(当前余额 ${bal})` : ''}`
+  }
+  if (res.status === 429) return `${what}失败:${msg || '请求过于频繁,请稍后再试'}`
+  if (res.status === 401 || res.status === 403) return `${what}失败:设备登录已失效,请重新运行启动器登录。`
+  return `${what}失败:HTTP ${res.status}${msg ? ` — ${msg}` : ''}`
+}
+
 export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: 'peer_review',
@@ -87,7 +105,7 @@ export function apply(ctx: Context, config: Config): void {
         }),
         signal: exec.signal,
       })
-      if (!res.ok) throw new Error(`评审端点失败: HTTP ${res.status}`)
+      if (!res.ok) throw new Error(await describeError(res, '独立评审'))
       // 网关透传上游字节;上游可能夹 keep-alive 空行/注释。从首个 '{' 起截出 JSON 再解析,
       // 不依赖 res.json()(前导杂行会让它失败)。
       const raw = await res.text()

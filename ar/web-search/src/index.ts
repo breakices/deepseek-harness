@@ -61,6 +61,28 @@ interface SearchApiResponse {
   truncated?: boolean
 }
 
+/**
+ * 把网关的结构化错误体翻成人话。C 端最关键的一处:402 配额闸的 detail 里带
+ * {code, balance, owed, message},若只抛「HTTP 402」,用户在**付费时刻**看到的是
+ * 一串裸状态码,不知道要充值。401/403(设备登录失效)、429(限速)同理。
+ */
+async function describeError(res: Response, what: string): Promise<string> {
+  let detail: any
+  try {
+    detail = ((await res.json()) as any)?.detail
+  } catch {
+    /* 非 JSON 响应,退回状态码 */
+  }
+  const msg = typeof detail === 'string' ? detail : detail?.message
+  if (res.status === 402) {
+    const bal = detail?.balance
+    return `${what}失败:${msg || '积分不足,请充值后继续'}${typeof bal === 'number' ? `(当前余额 ${bal})` : ''}`
+  }
+  if (res.status === 429) return `${what}失败:${msg || '请求过于频繁,请稍后再试'}`
+  if (res.status === 401 || res.status === 403) return `${what}失败:设备登录已失效,请重新运行启动器登录。`
+  return `${what}失败:HTTP ${res.status}${msg ? ` — ${msg}` : ''}`
+}
+
 class RemoteSearchProvider implements WebSearchProvider {
   readonly id: string
   private readonly base: string
@@ -97,7 +119,10 @@ class RemoteSearchProvider implements WebSearchProvider {
     }
 
     if (!resp.ok) {
-      throw new WebError(`web search HTTP ${resp.status}`, 'WEB_PROVIDER_FAILED')
+      throw new WebError(
+        await describeError(resp, '联网搜索'),
+        resp.status === 402 ? 'WEB_QUOTA_EXCEEDED' : 'WEB_PROVIDER_FAILED',
+      )
     }
 
     const data = (await resp.json()) as SearchApiResponse

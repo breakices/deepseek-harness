@@ -87,7 +87,20 @@ export function apply(ctx: Context, config: Config): void {
         }),
         signal: exec.signal,
       })
-      if (!res.ok) throw new Error(`记忆写入失败: HTTP ${res.status}`)
+      if (!res.ok) {
+        // 结构化错误翻成人话:402 配额闸/401 登录失效/429 限速,别只抛裸状态码。
+        let detail: any
+        try {
+          detail = ((await res.json()) as any)?.detail
+        } catch {
+          /* 非 JSON */
+        }
+        const msg = typeof detail === 'string' ? detail : detail?.message
+        if (res.status === 402) throw new Error(`记忆写入失败:${msg || '积分不足,请充值后继续'}`)
+        if (res.status === 401 || res.status === 403) throw new Error('记忆写入失败:设备登录已失效,请重新运行启动器登录。')
+        if (res.status === 429) throw new Error(`记忆写入失败:${msg || '请求过于频繁,请稍后再试'}`)
+        throw new Error(`记忆写入失败:HTTP ${res.status}${msg ? ` — ${msg}` : ''}`)
+      }
       const data = (await res.json()) as { id?: string }
       if (!data.id) throw new Error('记忆写入返回无效')
       return { id: data.id }

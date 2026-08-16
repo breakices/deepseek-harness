@@ -18,10 +18,10 @@
     - id: ui-directory-picker-browse
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
 
-# 接线①: 主 LLM 通道换轨到 AR agent_gateway 代理(本机 ar_backend:8000)。
-# adapter 把 apiKeyEnv 解析出的值(AR_DEVICE_TOKEN=ar-spike-2026)当 Bearer 发给
+# 接线①: 主 LLM 通道换轨到 AR agent_gateway 代理。
+# adapter 把 apiKeyEnv(AR_DEVICE_TOKEN 环境变量)解析出的设备 token 当 Bearer 发给
 # baseURL/chat/completions —— 正是 gateway 的 device_auth 期望的设备 token。
-# 真实 DeepSeek key 只在 gateway 侧(ar_backend .env.local)。
+# 真实 DeepSeek key 只在 gateway 侧;设备侧绝不出现任何明文 token/常量(分发包尤其)。
 - id: llm-deepseek
   config:
     baseURL: https://dev.ar.knevo.ai/api/agent/v1/llm/deepseek

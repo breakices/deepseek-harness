@@ -104,10 +104,15 @@ writeFileSync(join(OUT, 'knevo.cmd'), [
   'setlocal',
   'set DSH_HOME=%~dp0.dsh-home',
   'cd /d %~dp0',
-  'if not exist node_modules (',
-  '  echo 首次安装依赖,约需几分钟...',
-  '  call npx -y pnpm@11.7.0 install --ignore-workspace || ( echo 依赖安装失败,请检查网络后重试。 & exit /b 1 )',
+  'rem 判据用真正需要的产物(.bin\\dsh.CMD),不是 node_modules 目录是否存在:',
+  'rem 首装要拉几百个包、耗时数分钟,中途断网/关窗/Ctrl+C 会留下**残缺**的 node_modules,',
+  'rem 若按目录存在判定,之后每次启动都跳过安装、直奔 dsh 然后「找不到路径」退出,',
+  'rem 初见者无从知道要手动删目录重来 —— 首用流程死锁。pnpm 重跑本身可自愈残缺目录。',
+  'if not exist "node_modules\\.bin\\dsh.CMD" (',
+  '  echo 安装依赖中,约需几分钟(中断了也没关系,重新运行本脚本会自动续装)...',
+  '  call npx -y pnpm@11.7.0 install --ignore-workspace || ( echo 依赖安装失败,请检查网络后重新运行本脚本。 & exit /b 1 )',
   ')',
+  'if not exist "node_modules\\.bin\\dsh.CMD" ( echo 依赖未安装完整,请重新运行本脚本。 & exit /b 1 )',
   'if exist "%DSH_HOME%\\.device-token" (',
   '  node "%~dp0knevo-login.mjs" --check || (',
   '    echo 登录已过期,请重新登录。',
@@ -129,7 +134,10 @@ writeFileSync(join(OUT, 'knevo.sh'), [
   '# Knevo 客户端启动器(macOS/Linux)。首次:装依赖(几分钟)+ 登录换设备 token。',
   'set -e; cd "$(dirname "$0")"',
   'export DSH_HOME="$PWD/.dsh-home"',
-  '[ -d node_modules ] || { echo "首次安装依赖,约需几分钟..."; npx -y pnpm@11.7.0 install --ignore-workspace; }',
+  '# 判据用真正需要的产物(./node_modules/.bin/dsh),不是 node_modules 目录是否存在:',
+  '# 首装耗时数分钟,中断会留下残缺目录;按目录判定会让之后每次启动都跳过安装并卡死。',
+  '[ -x ./node_modules/.bin/dsh ] || { echo "安装依赖中,约需几分钟(中断了重跑本脚本会自动续装)..."; npx -y pnpm@11.7.0 install --ignore-workspace; }',
+  '[ -x ./node_modules/.bin/dsh ] || { echo "依赖未安装完整,请重新运行本脚本。"; exit 1; }',
   'if [ -f "$DSH_HOME/.device-token" ]; then',
   '  node ./knevo-login.mjs --check || { echo "登录已过期,请重新登录。"; rm -f "$DSH_HOME/.device-token"; node ./knevo-login.mjs; }',
   'else',
@@ -140,6 +148,36 @@ writeFileSync(join(OUT, 'knevo.sh'), [
   'echo "启动 Knevo(连接 dev.ar.knevo.ai),首次启动约 1-3 分钟,好了用浏览器开 http://127.0.0.1:3180 ..."',
   './node_modules/.bin/dsh --profile web --port 3180', '',
 ].join('\n'))
+
+// 4.5) ★泄密闸:分发包是**公开可下载**的(/releases/download 无鉴权),任何明文 token
+//      常量进包 = 免注册后门(配 dev 的 env fallback 可直接冒充默认账户白嫖/错记账)。
+//      此前就漏过一次:replaceAll 只清了 fallback 表达式,注释里的同一常量原样打包。
+//      这里对**全部产物**做一次扫描,命中即让构建失败——比靠人记得改注释可靠。
+const FORBIDDEN = [/ar-spike-2026/i, /AR_DEVICE_DEV_TOKEN\s*=\s*\S+/i, /sk-[A-Za-z0-9]{16,}/]
+function scanForSecrets(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules') continue
+      scanForSecrets(p)
+      continue
+    }
+    let text
+    try {
+      text = readFileSync(p, 'utf8')
+    } catch {
+      continue // 二进制,跳过
+    }
+    for (const re of FORBIDDEN) {
+      const m = text.match(re)
+      if (m) {
+        throw new Error(`[build] 拒绝打包:${p} 含疑似机密「${m[0]}」——分发包公开可下载,清理后重试。`)
+      }
+    }
+  }
+}
+scanForSecrets(OUT)
+console.log('[build] 泄密闸通过(产物无明文 token 常量)')
 
 // 5) 打 tarball + sha256 + manifest（cwd+相对路径,避开 Windows tar 对含盘符路径的解析）
 const tgz = join(ROOT, 'dist', `knevo-ar-${VERSION}.tgz`)
