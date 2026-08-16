@@ -6,8 +6,16 @@
 
 ## 前置
 
-- 装有 **Node.js ≥ 22**（`node -v` 确认）。Windows / macOS / Linux 均可 —— 原生组件走各平台
-  预编译包，无需编译器。
+- **Node.js `22.19+` 或 `24+`**(`node -v` 确认)。低于此版本 dsh 起不来(缺 `node:zlib`
+  的 zstd 支持);启动器会先检查并给出明确提示,不会让你撞见看不懂的报错。
+- 平台支持:
+
+  | 平台 | 状态 | 说明 |
+  |---|---|---|
+  | Windows x64 | ✅ 实测通过 | 原生组件走随包预编译,无需编译器 |
+  | Linux x64 | ✅ 实测通过 | node-pty 无 linux 预编译,**需 `python3` + `make` + `g++`**(Debian/Ubuntu:`apt install -y build-essential python3`),首装现场编译一次 |
+  | macOS (arm64/x64) | ⚠️ 未实测 | 随包带 darwin 预编译,无需编译器;理论可用,未在真机验证 |
+
 - 一个 Knevo 账号（在 https://dev.ar.knevo.ai 用邀请码注册），且**账号里有积分**
   （内测期由管理员发放；没有积分时云端能力会返回 402）。
 
