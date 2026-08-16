@@ -48,3 +48,6 @@ worktrees/
 .dsh-home/.trace-spike/
 .dsh-home/credentials*
 generated/
+
+dist/
+.knevo-releases/
