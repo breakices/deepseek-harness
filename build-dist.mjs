@@ -11,14 +11,21 @@
  *
  * 用法:node build-dist.mjs [version]   (默认 0.1.0)
  */
-import { build } from 'esbuild'
-import { mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { execSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
+
+// esbuild 藏在 monorepo 的 pnpm 虚拟store里(非顶层 hoisted),按路径 require(CJS)。
+const require = createRequire(import.meta.url)
+const _pnpm = join(ROOT, 'node_modules', '.pnpm')
+const _esDir = readdirSync(_pnpm).find((d) => d.startsWith('esbuild@'))
+if (!_esDir) throw new Error('找不到 esbuild(node_modules/.pnpm/esbuild@*)——先在 monorepo 跑过 pnpm install')
+const { build } = require(join(_pnpm, _esDir, 'node_modules', 'esbuild'))
 const VERSION = process.argv[2] || '0.1.0'
 const DSH_VERSION = '0.1.0-rc.6'
 
@@ -60,7 +67,12 @@ for (const p of PLUGINS) {
 writeFileSync(join(OUT, 'package.json'), JSON.stringify({
   name: 'knevo-ar', version: VERSION, private: true, type: 'module',
   description: 'Knevo（AR × dsh 形态 D）客户端 —— dsh 当 runtime,连 Knevo 云端。',
-  dependencies: { '@deepseek-ai/dsh': DSH_VERSION, ...fileDeps },
+  dependencies: {
+    '@deepseek-ai/dsh': DSH_VERSION,
+    // web_fetch 用的原生 fetch provider —— base bundle 禁 fetch 不带它,单独装(patch 里 insert)。
+    '@deepseek-ai/dsh-web-fetch-http': '0.0.1-rc.5',
+    ...fileDeps,
+  },
 }, null, 2))
 
 // 3) profile 接线 + 启动器(从工作副本拷,过滤掉运行态/密钥)
@@ -105,9 +117,10 @@ writeFileSync(join(OUT, 'knevo.sh'), [
   './node_modules/.bin/dsh --profile web --port 3180', '',
 ].join('\n'))
 
-// 5) 打 tarball + sha256 + manifest
+// 5) 打 tarball + sha256 + manifest（cwd+相对路径,避开 Windows tar 对含盘符路径的解析）
 const tgz = join(ROOT, 'dist', `knevo-ar-${VERSION}.tgz`)
-execSync(`tar -czf "${tgz}" -C "${join(ROOT, 'dist')}" "knevo-ar-${VERSION}"`, { stdio: 'inherit' })
+execSync(`tar --force-local -czf "knevo-ar-${VERSION}.tgz" "knevo-ar-${VERSION}"`,
+  { cwd: join(ROOT, 'dist'), stdio: 'inherit' })
 const sha = createHash('sha256').update(readFileSync(tgz)).digest('hex')
 const manifest = { version: VERSION, filename: `knevo-ar-${VERSION}.tgz`, sha256: sha,
   notes: 'Knevo 形态 D 客户端(dsh runtime + AR profile)。' }
