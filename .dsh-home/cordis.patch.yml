@@ -45,6 +45,17 @@
 - id: ui-trajectory
   disabled: true
 
+# 模式:**不再另起一个 knevo 预设**,而是把 dsh 内置的三个预设整体适配成 Knevo 的
+# (装完后由 knevo-brand.mjs 就地改:换研究人格、打开 web_fetch、改显示名与描述,
+#  并删掉「创造模式」—— 那个能让 agent 读写自己运行的 runtime,不该给终端用户)。
+#
+# 为什么必须改文件而不是加一个自己的预设:内置预设是 dsh 包自带的 shipped root
+# (apps/cli/src/profile-boot.ts:35/164,system 信任),而 discoverPresets 是**先者胜**、
+# 用户根最后追加(index.ts:134)—— 放在 $DSH_HOME/.agent-presets 里的同名预设盖不过它;
+# profile-boot 还会在本文件生效之后强行覆盖 roots,所以连 config 都改不了。
+#
+# 结果:用户看到的三个模式(研究/程序/极简)全是我们的,没有"knevo 模式"这种东西。
+
 # 主循环模型对齐 AR 产品:base 的 agent-default-model 钉的是 deepseek-v4-flash,
 # 研究产品主模型是 v4-pro(实测设备端 turns 都记在 flash 上,质量掉档)。
 # 注意:此行 config 覆写不是 merge,schema 要求 provider+model 都给全,缺 provider 会
@@ -78,7 +89,7 @@
 # 且把 web_fetch 关了,直接用它的话产品就是"接了我们 provider 的 dsh"。
 - id: agent-presets
   config:
-    default: knevo
+    default: standard
 
 # 去掉 dsh 自带的身份句("You are an AI agent powered by DeepSeek Harness."),
 # 人格由 preset 的 persona 提供(order 0),身份句在 order -100。

@@ -31,7 +31,12 @@ const DSH_VERSION = '0.1.0-rc.6'
 // 前端资源由**我们托管**:构建时取发布版、改品牌、随包发,再用 pnpm overrides 指过去。
 // 这样用户装依赖时解析到我们的副本,不从 npm 拉原装(品牌不经第三方)。
 const FE_VERSION = '0.1.0-rc.6'
-const BRAND = { title: 'Knevo', short: 'Knevo', icon: 'knevo-icon.png' }
+const BRAND = { title: 'Knevo', short: 'Knevo', icon: 'knevo-icon.png', slogan: '知无涯' }
+// 品牌图形/文案的锚点(压缩后标识符随机,只能靠语义属性定位;找不到就让构建失败)
+const WORDMARK_ANCHOR = 'viewBox:"0 0 182 24"'      // 侧栏顶部 deepseek HARNESS
+const HERO_FISH_ANCHOR = 'viewBox:"0 0 23.16 17.04"' // 首页 hero 的鲸鱼
+const HERO_HEADLINE_ZH = '"hero.headline": "探索未至之境"'
+const HERO_HEADLINE_EN = '"hero.headline": "Into the Unknown"'
 
 // Node 版本闸的脚本体(双引号 JS 字符串承载,内部只用单引号,避免与两种 shell 的引号打架)。
 const NODE_GUARD = "const v=process.versions.node.split('.').map(Number); "
@@ -66,6 +71,41 @@ const PLATFORM_MODULES = [
   '@deepseek-ai/dsh-client-ui-attachment',
   '@deepseek-ai/dsh-client-schema-form',
 ]
+
+/**
+ * 在压缩后的 JS 里,把「包含某个锚点的那个 JSX 元素表达式」整体换掉。
+ *
+ * 品牌图形是**内联 SVG**(不是资源文件),所以改不了文件、只能改代码。压缩后标识符
+ * 是随机的(`f.jsxs(...)` 里的 `f` 每次构建都可能不同),因此:锚点用**语义属性**
+ * (viewBox 尺寸),工厂名从锚点附近现取,再用括号配对找到表达式边界。
+ *
+ * @param {string} src   压缩后的源码
+ * @param {string} anchor 锚点(如 `viewBox:"0 0 182 24"`)
+ * @param {(jsx: string) => string} build 给定 JSX 工厂名,返回替换用的表达式
+ * @returns {string} 替换后的源码;找不到锚点抛错(**故意 fail loud**:上游改版时
+ *          我们要立刻知道品牌没改成功,而不是发一个还印着上游 logo 的包出去)
+ */
+function replaceJsxElement(src, anchor, build) {
+  const at = src.indexOf(anchor)
+  if (at < 0) throw new Error(`[build] 品牌锚点未找到: ${anchor}`)
+  // 往前找到这个元素的起点 `X.jsx(` 或 `X.jsxs(`
+  const head = src.lastIndexOf('.jsx', at)
+  const openParen = src.indexOf('(', head)
+  let s = head
+  while (s > 0 && /[A-Za-z0-9_$]/.test(src[s - 1])) s--
+  const jsx = src.slice(s, head)          // 工厂对象名,如 `f`
+  // 从 `(` 起做括号配对,拿到整个调用表达式的范围
+  let depth = 0, i = openParen, inStr = null
+  for (; i < src.length; i++) {
+    const c = src[i]
+    if (inStr) { if (c === '\\') i++; else if (c === inStr) inStr = null; continue }
+    if (c === '"' || c === "'" || c === '`') { inStr = c; continue }
+    if (c === '(') depth++
+    else if (c === ')') { depth--; if (depth === 0) break }
+  }
+  if (depth !== 0) throw new Error(`[build] 括号配对失败: ${anchor}`)
+  return src.slice(0, s) + build(jsx) + src.slice(i + 1)
+}
 
 /**
  * 构建期冒烟:用最小宿主执行浏览器半边的自注册脚本,验证 factory 真能跑出插件对象。
@@ -213,12 +253,14 @@ mkdirSync(join(OUT, '.dsh-home'), { recursive: true })
 const patchSrc = readFileSync(join(ROOT, '.dsh-home', 'cordis.patch.yml'), 'utf8')
 writeFileSync(join(OUT, '.dsh-home', 'cordis.patch.yml'),
   patchSrc.replaceAll(`process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'`, `process.env.AR_DEVICE_TOKEN || ''`))
-// ★随包发我们自己的 agent preset(.dsh-home/.agent-presets/<id>/agent.cordis.yml)。
-//   人格、子 agent、web_fetch 都在 preset 层;不带它的话产品会退回上游 standard
-//   预设的"编码 agent"人格。$DSH_HOME 是 agent-presets 的用户根,无需改 dsh。
-cpSync(join(ROOT, '.dsh-home', '.agent-presets'), join(OUT, '.dsh-home', '.agent-presets'), { recursive: true })
+// ★不再随包发我们自己的 preset(原来那个 `knevo` 已删)。
+//   人格与 web_fetch 确实只能在 preset 层设,但**用户根盖不过内置预设**
+//   (discoverPresets 先者胜、用户根最后追加),所以另起一个 id 的结果是用户看到
+//   "四个上游模式 + 一个 knevo 模式" —— 像开发工具,不像产品。
+//   现在改成:装完后由 knevo-brand.mjs 把 dsh **内置的三个预设**整体适配成我们的
+//   (研究/程序/极简),并删掉「创造模式」。用户看到的每个模式都是 Knevo 的。
 
-for (const f of ['knevo-login.mjs', 'knevo-update.mjs', 'KNEVO-README.md']) {
+for (const f of ['knevo-login.mjs', 'knevo-update.mjs', 'knevo-brand.mjs', 'KNEVO-README.md']) {
   if (existsSync(join(ROOT, f))) cpSync(join(ROOT, f), join(OUT, f))
 }
 
@@ -249,6 +291,8 @@ writeFileSync(join(OUT, 'knevo.cmd'), [
   '  call npx -y pnpm@11.7.0 install || goto :installfail',
   ')',
   'if not exist "node_modules\\.bin\\dsh.CMD" goto :installfail',
+  'rem Upstream slogan lives inside an npm package, not our self-hosted shell.',
+  'node "%~dp0knevo-brand.mjs"',
   'if exist "%DSH_HOME%\\.device-token" (',
   '  node "%~dp0knevo-login.mjs" --check || (',
   '    echo Device login expired, please sign in again.',
@@ -293,6 +337,8 @@ writeFileSync(join(OUT, 'knevo.sh'), [
   '         ./node_modules/node-pty/build/Release/spawn-helper; do',
   '  [ -f "$f" ] && chmod 755 "$f" 2>/dev/null || true',
   'done',
+  '# 上游残留的标语在 npm 包内(不在我们自托管的前端壳里),装完就地改。',
+  'node ./knevo-brand.mjs',
   'if [ -f "$DSH_HOME/.device-token" ]; then',
   '  node ./knevo-login.mjs --check || { echo "登录已过期,请重新登录。"; rm -f "$DSH_HOME/.device-token"; node ./knevo-login.mjs; }',
   'else',
@@ -341,6 +387,30 @@ if (existsSync(feManifest)) {
   if (mf.short_name) mf.short_name = BRAND.short
   mf.icons = [{ src: `/${BRAND.icon}`, sizes: '512x512', type: 'image/png', purpose: 'any' }]
   writeFileSync(feManifest, JSON.stringify(mf, null, 2))
+}
+
+// 侧栏顶部的 `deepseek HARNESS` wordmark:内联 SVG(viewBox 0 0 182 24),换成我们的
+// 图标 + 产品名。这是用户第一眼看到的地方,留着上游 wordmark 等于产品没做完。
+{
+  const shellJs = readdirSync(join(feDist, 'assets')).filter((f) => /^index-.*\.js$/.test(f))
+  let done = 0
+  for (const f of shellJs) {
+    const p = join(feDist, 'assets', f)
+    let src = readFileSync(p, 'utf8')
+    if (!src.includes(WORDMARK_ANCHOR)) continue
+    // 侧栏 wordmark → 我们的图标 + 产品名
+    src = replaceJsxElement(src, WORDMARK_ANCHOR, (jsx) =>
+      `${jsx}.jsxs("span",{className:r,style:{display:"inline-flex",alignItems:"center",gap:"0.45em",`
+      + `fontWeight:600,fontSize:(n*0.72)+"px",letterSpacing:"0.01em"},children:[`
+      + `${jsx}.jsx("img",{src:"/${BRAND.icon}",height:n,width:n,alt:""}),"${BRAND.title}"]})`)
+    // hero 的鲸鱼 → 同一个图标(hero 是 图形 + slogan 的组合,换图不换布局)
+    src = replaceJsxElement(src, HERO_FISH_ANCHOR, (jsx) =>
+      `${jsx}.jsx("img",{src:"/${BRAND.icon}",width:n,height:n,className:r,alt:""})`)
+    writeFileSync(p, src)
+    done++
+  }
+  if (done !== 1) throw new Error(`[build] 品牌图形替换命中 ${done} 个 bundle(期望 1),中止`)
+  console.log('  [brand] 侧栏 wordmark 与 hero 图形已换成 Knevo')
 }
 
 // 品牌闸:标题、图标引用、图标文件、以及**上游 favicon 已清除**,四项都得过,
