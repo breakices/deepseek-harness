@@ -1,15 +1,35 @@
-# DEVIATIONS — AR spike 对上游文件的改动台账
+# DEVIATIONS — 本副本对**上游文件**的改动台账
 
-本副本（`ar_deepseek_harness`，分支 `feat/ar-research-full`，基于 fork 的 `feat/workspace-file-tree`）是 AR 功能迁移的源码 spike。每处**上游文件**改动记一行：文件、为什么、终态怎么收敛（对照工作区根 `../AR-DSH-STATUS.md` 与 `../AR-DSH-ARCHITECTURE-MAP.md`）。`ar/` 目录与 `.dsh-home/` 是新增区，不算 deviation。
+本副本（`ar_deepseek_harness`，分支 `feat/ar-research-full`，基于 fork 的 `feat/workspace-file-tree`）
+是 Knevo 客户端（形态 D）的设备侧代码。**每处对上游文件的改动记一行**；
+`ar/`、`.dsh-home/`、`build-dist.mjs`、`knevo-*.mjs`、`assets/brand/` 是新增区，不算 deviation。
+
+现状与决策以工作区根 `../AR-DSH-STATUS.md` 为准，架构见 `../AR-DSH-ARCHITECTURE-MAP.md`。
 
 | # | 文件 | 改了什么 | 为什么 | 终态收敛 |
 |---|---|---|---|---|
-| 1 | `pnpm-workspace.yaml` | packages 加 `ar/*` | @knevo 插件区进 workspace | 插件迁独立 `ar-agent/` 仓 + profile 机制，条目删除 |
-| 2 | `tsconfig.base.json` | paths 加 `@knevo/dsh-ar-hello` | 源码模式 tsx 按 paths 解析裸包名 | 同上；发行态走 profile node_modules 解析，无需 paths |
+| 1 | `pnpm-workspace.yaml` | packages 加 `ar/*` | @knevo 插件区进 workspace | 插件迁独立仓 + profile 机制后删除 |
+| 2 | `tsconfig.base.json` | paths 加 9 个 `@knevo/dsh-ar-*` | 源码模式 tsx 按 paths 解析裸包名 | 同上；发行态走 node_modules 解析，无需 paths |
+| 3 | `.gitignore` | 忽略 `.dsh-home/` 运行态与凭据、`dist/`、`.fe-cache/` | `.credentials.yaml` 存 `AR_DEVICE_TOKEN`/`DEEPSEEK_API_KEY`，原 pattern `credentials*` **匹配不到前导点**，一次 `git add -A` 就会入库 | 保留 |
 
-运行副本约定：`DSH_HOME=D:\ar_dsh\ar_deepseek_harness\.dsh-home`；pnpm 用 `npx -y pnpm@11.7.0`；本地探测 `curl --noproxy '*'`；web 端口 3180（3080 被日常正本实例占用）。
+**上游 `packages/` 的源码一行未改。** 品牌与预设的适配都发生在**分发包安装之后**
+（`knevo-brand.mjs` 就地改用户机器上装好的副本），不改本仓上游源码 —— 这样跟上游升级时
+冲突面最小。代价是那些改动依赖锚点字符串，上游改版会让锚点失配（脚本会告警，构建期的品牌闸会失败）。
 
-## Spike 发现（回填设计用）
+## 与上游的运行期差异（不是文件改动，但会影响行为）
 
-- skill-filesystem 默认根包含 `~/.agents/skills`（user-agents，rank 500）——本机个人技能（lark-* 等 30+ 个）混进了目录。**产品形态必须用 `includeDefaultRoots: false` 的隔离 provider**，只看 AR 下发的技能根。已回填至设计文档待办。
-- AR 技能正文引用 AR 工具名（shell / run_sandbox / read_file / list_dir），dsh 侧是 bash / 文件工具——技能文迁移时需统一改写或做工具名对照层（M3 处理）。
+- **压缩用上游自己的**：曾接过 AR 版（`ar-compact` + `assets-core`），2026-08-17 撤除 ——
+  差量只有一段提示词且两边同源，而 dsh 那版更完整（重复压缩会合并旧 checkpoint、带 checkpoint 封装），
+  我们覆盖 `summarize()` 反而把这些锚点弄丢了。
+- **`ar-goals-judge` 已撤**：AR 侧的 `goals/judge.py` 本身已被删除（理由见其 `goals/tool.py`），
+  我们迁的是个上游已废弃的机制；dsh 自带完整 goal 三件套 + `goal-round-driver`。
+- **随包发 `@deepseek-ai/dsh-client-ui-file-tree`**：它是本 fork 独有、npm 上不存在（实测 404），
+  所以装上游 dsh 的分发包里没有它。现由 `build-dist.mjs` 自己打包（含 esbuild 版 CSS Modules 处理）。
+
+## Spike 期发现（已处理或已作废）
+
+- skill-filesystem 默认根包含 `~/.agents/skills`，本机个人技能会混进目录 ——
+  产品形态需要 `includeDefaultRoots: false` 的隔离 provider。**未做**，仍在待办。
+- AR 技能正文引用的是 AR 的工具名（`shell` / `run_sandbox` / `read_file`），而设备端是 dsh 词汇
+  （`bash` / `read` / `write`）。**产品决定：改我们自己的技能描述去对齐 dsh**，不做工具名对照层。
+  下发范围也要从 `skills/general`（6 条）扩到含 `research`（23 条）。**未做**，在待办。
