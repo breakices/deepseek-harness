@@ -31,7 +31,7 @@ const DSH_VERSION = '0.1.0-rc.6'
 // 前端资源由**我们托管**:构建时取发布版、改品牌、随包发,再用 pnpm overrides 指过去。
 // 这样用户装依赖时解析到我们的副本,不从 npm 拉原装(品牌不经第三方)。
 const FE_VERSION = '0.1.0-rc.6'
-const BRAND = { title: 'Knevo', short: 'Knevo' }
+const BRAND = { title: 'Knevo', short: 'Knevo', icon: 'knevo-icon.png' }
 
 // Node 版本闸的脚本体(双引号 JS 字符串承载,内部只用单引号,避免与两种 shell 的引号打架)。
 const NODE_GUARD = "const v=process.versions.node.split('.').map(Number); "
@@ -42,7 +42,29 @@ const NODE_GUARD = "const v=process.versions.node.split('.').map(Number); "
 // AR profile 需要的 @knevo 插件(与 .dsh-home/cordis.patch.yml 的 insert 一致)
 const PLUGINS = [
   'hello', 'telemetry', 'skills-remote', 'memory', 'image',
-  'web-search', 'peer-review', 'compact', 'goals-judge', 'assets-core',
+  'web-search', 'peer-review',
+  'ui-account', 'vision',
+]
+
+// 带**浏览器半边**的插件(package.json 里 dsh.client.platform=web)。
+// client UI 插件不进前端 bundle:node 侧 ClientModuleRegistry 扫 Loader entry 的
+// package.json，命中就把 exports['./client'] 那个文件挂到 /plugins/<包名>/client.js，
+// 并把清单注进 index.html 的 window.__DSH_BOOT__；浏览器再逐个 <script> 拉。
+// 所以自托管的 dsh-web-frontend 一行都不用改，只需要在这里多出一份浏览器产物。
+const UI_PLUGINS = { 'ui-account': 'src/client/index.tsx' }
+
+// 浏览器半边唯一允许 external 的 specifier —— 必须**逐字**等于 shell seed 的那批
+// (packages/client/web/src/platform.ts 的 PLATFORM_MODULES)。多写一个、少写一个，
+// 构建期都不报错，运行期 require 抛错 → **整个 UI 白屏**（boot 的 assertEntriesActive
+// 只要有一个 entry 没 ACTIVE 就停在 loading 页）。
+const PLATFORM_MODULES = [
+  'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client',
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-client-web-react',
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-client-ui-attachment',
+  '@deepseek-ai/dsh-client-schema-form',
 ]
 
 const OUT = join(ROOT, 'dist', `knevo-ar-${VERSION}`)
@@ -65,12 +87,31 @@ for (const p of PLUGINS) {
     external: ['@deepseek-ai/*', 'node:*'],
     logLevel: 'warning',
   })
-  writeFileSync(join(outDir, 'package.json'), JSON.stringify({
+  const pkg = {
     name, version: VERSION, private: true, type: 'module',
     exports: { '.': './index.js', './package.json': './package.json' },
-  }, null, 2))
+  }
+  if (UI_PLUGINS[p] !== undefined) {
+    // 浏览器半边:CJS + 自注册 banner/footer,格式必须与上游 tsdown.client.ts 逐字一致
+    // (`window.__ModuleLoader__.load({id, factory})` 是壳与插件之间的私有约定)。
+    await build({
+      entryPoints: [join(ROOT, 'ar', p, UI_PLUGINS[p])],
+      outfile: join(outDir, 'client.js'),
+      bundle: true, format: 'cjs', platform: 'browser', target: 'es2022',
+      jsx: 'automatic',
+      external: PLATFORM_MODULES,
+      banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(name)}, factory: (require) => {` },
+      footer: { js: 'return module.exports; } });' },
+      // esbuild 的 CJS 产物自带 module/exports 声明,不需要上游那条 intro。
+      logLevel: 'warning',
+    })
+    pkg.exports['./client'] = './client.js'
+    pkg.dsh = { client: { platform: 'web' } }
+    console.log(`  [bundle] ${name} (含浏览器半边)`)
+  }
+  writeFileSync(join(outDir, 'package.json'), JSON.stringify(pkg, null, 2))
   fileDeps[name] = `file:./plugins/${p}`
-  console.log(`  [bundle] ${name}`)
+  if (UI_PLUGINS[p] === undefined) console.log(`  [bundle] ${name}`)
 }
 
 // 2) 顶层 package.json:依赖 dsh + 各插件
@@ -231,22 +272,42 @@ cpSync(join(feCache, feTgz), join(feDir, feTgz))
 execSync(`tar --force-local -xzf "${feTgz}" --strip-components=1`, { cwd: feDir, stdio: 'inherit' })
 rmSync(join(feDir, feTgz), { force: true })
 
-// 改品牌:页面标题 + PWA 名称
-const feIndex = join(feDir, 'dist', 'index.html')
+// 改品牌:页面标题 + PWA 名称 + **图标**
+const feDist = join(feDir, 'dist')
+const feIndex = join(feDist, 'index.html')
+
+// 图标:换成 Knevo 自己的。上游的 favicon.svg(鲸鱼)直接删掉 —— 留着它就还能被
+// 请求到,浏览器标签页/PWA 安装图标都可能仍显示上游品牌。
+cpSync(join(ROOT, 'assets', 'brand', BRAND.icon), join(feDist, BRAND.icon))
+rmSync(join(feDist, 'favicon.svg'), { force: true })
 writeFileSync(feIndex, readFileSync(feIndex, 'utf8')
-  .replace(/<title>[^<]*<\/title>/, `<title>${BRAND.title}</title>`))
-const feManifest = join(feDir, 'dist', 'manifest.webmanifest')
+  .replace(/<title>[^<]*<\/title>/, `<title>${BRAND.title}</title>`)
+  // 上游是 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  .replace(/<link[^>]*rel="icon"[^>]*>/,
+    `<link rel="icon" type="image/png" href="/${BRAND.icon}" />`))
+
+const feManifest = join(feDist, 'manifest.webmanifest')
 if (existsSync(feManifest)) {
   const mf = JSON.parse(readFileSync(feManifest, 'utf8'))
   if (mf.name) mf.name = BRAND.title
   if (mf.short_name) mf.short_name = BRAND.short
+  mf.icons = [{ src: `/${BRAND.icon}`, sizes: '512x512', type: 'image/png', purpose: 'any' }]
   writeFileSync(feManifest, JSON.stringify(mf, null, 2))
 }
-// 校验品牌真的改到了(改名失败就别发)
-if (!readFileSync(feIndex, 'utf8').includes(`<title>${BRAND.title}</title>`)) {
+
+// 品牌闸:标题、图标引用、图标文件、以及**上游 favicon 已清除**,四项都得过,
+// 任一没改成功就别发 —— 品牌漏出去比构建失败糟得多。
+const idxHtml = readFileSync(feIndex, 'utf8')
+if (!idxHtml.includes(`<title>${BRAND.title}</title>`)) {
   throw new Error('[build] 前端标题未改成功,中止')
 }
-console.log('[build] 前端资源已自托管并改品牌')
+if (!idxHtml.includes(`href="/${BRAND.icon}"`) || idxHtml.includes('favicon.svg')) {
+  throw new Error('[build] 前端图标未换成 Knevo 图标(或仍引用上游 favicon),中止')
+}
+if (!existsSync(join(feDist, BRAND.icon)) || existsSync(join(feDist, 'favicon.svg'))) {
+  throw new Error('[build] 图标文件未就位 / 上游 favicon 未清除,中止')
+}
+console.log('[build] 前端资源已自托管并改品牌(含图标)')
 
 // 第三方许可声明(MIT 要求随副本分发版权与许可声明;界面无需出现)
 const upstreamLicense = existsSync(join(feDir, 'LICENSE')) ? readFileSync(join(feDir, 'LICENSE'), 'utf8') : ''

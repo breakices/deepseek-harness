@@ -70,7 +70,7 @@ class RemoteSkillProvider implements SkillProvider {
         invocation: { modelInvocable: s.modelInvocable !== false, userInvocable: s.userInvocable !== false },
         source: 'ar-remote',
         provider: this.name,
-        resourceBase: { kind: 'url', url: `${this.base}/skills/${encodeURIComponent(s.name)}` },
+        resourceBase: AR_RESOURCE_BASE,
         rank: AR_SKILL_RANK,
         locator: { name: s.name, version: s.version ?? null },
       }))
@@ -95,13 +95,24 @@ class RemoteSkillProvider implements SkillProvider {
         invocation: { modelInvocable: s.modelInvocable !== false, userInvocable: s.userInvocable !== false },
         source: 'ar-remote',
         provider: this.name,
-        resourceBase: { kind: 'url', url: `${this.base}/skills/${encodeURIComponent(nm)}` },
+        resourceBase: AR_RESOURCE_BASE,
         content: s.content ?? '',
       }
     } catch {
       return undefined
     }
   }
+}
+
+/**
+ * 技能资源基址。**刻意不给 URL**：给 url 会让 renderSkillContent 把「按此 base 解析
+ * 相对链接」写进提示，模型可能真的用 web_fetch 去抓那个端点 —— 而 web_fetch 走的是
+ * 设备本机 provider，不带设备 token，只会拿到 401，白烧一轮工具调用。
+ * 技能正文由网关就地展开，设备侧本就不需要能解析的资源基址。
+ */
+const AR_RESOURCE_BASE = {
+  kind: 'opaque' as const,
+  description: '技能资源由 Knevo 云端提供，无需自行抓取。',
 }
 
 export function apply(ctx: Context, config: Config): void {

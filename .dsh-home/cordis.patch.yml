@@ -36,6 +36,15 @@
 - id: ui-model-selection
   disabled: true
 
+# 产品决定:执行轨迹**不对普通用户开放** —— 普通用户只看对话页,轨迹只有管理员能看
+# (管理员视图在云端 /api/admin/trace/*,数据本来就已经上云)。
+# ui-trajectory 只注册 conversation.view 的一个 list entry(id='trajectory'),
+# 上游 ui-conversation/apply.ts 明确注释「未注册 trajectory 是安全的」,tab 环会回落到首个视图。
+# ★注意:不能顺手把 ui-tool 也关掉 —— tool-call 节点失去 renderer 后会回落成原始 JSON dump,
+#   比工具卡片更暴露也更难看。工具卡片是研究产品的可信度信号,保留。
+- id: ui-trajectory
+  disabled: true
+
 # 主循环模型对齐 AR 产品:base 的 agent-default-model 钉的是 deepseek-v4-flash,
 # 研究产品主模型是 v4-pro(实测设备端 turns 都记在 flash 上,质量掉档)。
 # 注意:此行 config 覆写不是 merge,schema 要求 provider+model 都给全,缺 provider 会
@@ -95,6 +104,7 @@
 
       产出:
       - 报告、数据、图表一律写进工作区文件(write/edit 工具),路径用工作区相对路径,不要用本机绝对路径。
+      - **要看图片内容用 describe_image**(主模型不收图,read_file 读图会被拒);生成图片用 generate_image。
       - 正文里给出可点击的真实引用链接;必要时附来源清单。
       - 回复用用户使用的语言;先给结论,再给依据,最后给不确定性与后续建议。
 
@@ -121,6 +131,16 @@
       config:
         endpoint: https://dev.ar.knevo.ai/api/agent/v1/memories/rank
         token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
+# 读图工具: describe_image → gateway /vision → 图转文字描述。
+# 必须有:dsh 的 DeepSeek adapter 把整个 provider 声明成 inputModalities:['text']
+# (adapter.ts:113,事实正确——DS 不收图),所以 read_file 读 PNG 会被硬拒。
+# AR 后端一直是走独立 vision provider 把图转 caption 再回灌主循环,这里补上同一条旁路,
+# 否则 generate_image 画出来的图 agent 自己看不了。
+    - id: ar-vision
+      name: '@knevo/dsh-ar-vision'
+      config:
+        endpoint: https://dev.ar.knevo.ai/api/agent/v1/vision
+        token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
 # 生图工具: generate_image → gateway /images → 写工作区 → 文件区预览
     - id: ar-image
       name: '@knevo/dsh-ar-image'
@@ -134,6 +154,14 @@
       config:
         baseUrl: https://dev.ar.knevo.ai/api/agent/v1
         token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
+# 账号与积分面板(设置 > 账号):登录走浏览器授权、显示余额/可用额度/最近消耗。
+# 这个包**有浏览器半边**(package.json 的 dsh.client.platform=web) —— client UI 插件是
+# 运行期由 node 侧按 /plugins/<id>/client.js 提供的,不进前端 bundle,所以自托管的
+# dsh-web-frontend 不用重打包。设备 token 只留在 node 侧,页面只跟本机 /knevo 通道说话。
+    - id: ar-ui-account
+      name: '@knevo/dsh-ar-ui-account'
+      config:
+        baseUrl: https://dev.ar.knevo.ai/api/agent/v1
 # peer_review: 拼上下文 → 调统一 /llm 的 review channel(平台持 grok key,跨模型独立审)。
     - id: ar-peer-review
       name: '@knevo/dsh-ar-peer-review'
@@ -141,12 +169,20 @@
         endpoint: https://dev.ar.knevo.ai/api/agent/v1/llm/review/chat/completions
         token: !!js process.env.AR_DEVICE_TOKEN || 'ar-spike-2026'
         model: x-ai/grok-4.5
-# 接线④: compaction —— ctx.compaction 单例,disable 默认 basic,装 AR 提示词版。
-- id: compaction-basic
-  name: '@deepseek-ai/dsh-compaction-basic'
-  disabled: true
-- insert:
-    - id: ar-compact
-      name: '@knevo/dsh-ar-compact'
-    - id: ar-goals-judge
-      name: '@knevo/dsh-ar-goals-judge'
+# 压缩:**用 dsh 自己的**,不再接 AR 版(ar-compact 与 assets-core 已删,2026-08-17)。
+#
+# 撤除理由(逐条比对过 packages/compaction/compaction-basic/src/summarizer.ts):
+#   • ar-compact 只覆盖了 summarize() 一个钩子,差量就是"一段提示词";而两段提示词
+#     **同源** —— AR 那段自述"骨架来自 Claude Code 压缩原文",dsh 那段也是。
+#   • dsh 的版本反而更完整:遇到已有 <compacted-summary> 块会**合并而不是原样抄下去**
+#     (长会话反复压缩不会越堆越厚),还带 checkpoint 封装与"当既定背景、别复述"的前言。
+#     我们覆盖 summarize() 回裸文本块,恰好把这套锚点弄丢了。
+#   • AR 版还多一个 <analysis> 前置块 = 每次压缩白花一份输出 token。
+#   • 而且它很可能一直没生效:preset 自己在 isolate:{compaction:true} 的组里又挂了
+#     一份上游 compaction-basic(agent.cordis.yml:157-165),preset 不受本文件影响。
+#
+# 结论:少一个插件、少一个包、少一处 preset/host 遮蔽隐患,且拿回上游的合并语义。
+# ar-goals-judge 已撤(2026-08-17):AR 侧的 goals/judge.py **已经被删除**,
+# update_goal 的 complete 直接 set_status(撤除理由见 ar_backend goals/tool.py:137-148)。
+# 我们曾把它迁到设备端 —— 迁的是个上游已废弃的机制。dsh 自己有完整的 goal 三件套
+# (create_goal/get_goal/update_goal + goal-round-driver 空闲续跑),不需要额外裁判。

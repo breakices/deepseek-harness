@@ -1,6 +1,6 @@
 {
-  "name": "@knevo/dsh-ar-goals-judge",
-  "description": "AR 接线④: 目标完成裁判 —— tools/pre-execute 拦 update_goal complete，跨模型独立裁判",
+  "name": "@knevo/dsh-ar-vision",
+  "description": "AR 读图工具: describe_image → 调 agent_gateway /vision → 图转文字描述(主模型不收图)",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -10,14 +10,14 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-goal": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/dsh-fs": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-goal": "workspace:^",
-    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/dsh-fs": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^"
   }
 }

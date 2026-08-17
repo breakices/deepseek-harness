@@ -18,7 +18,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-fs'
 
 export const name = 'ar-image'
-export const inject = ['tools', 'fs']
+// attachments 是可选依赖:有它才能把生成的图内联渲染进对话(没有就只回路径)。
+export const inject = { required: ['tools', 'fs'], optional: ['attachments'] }
 
 export interface Config {
   /** 生图端点,如 http://localhost:8000/api/agent/v1/images */
@@ -36,7 +37,10 @@ export const Config: z<Config> = z.object({
 async function describeError(res: Response, what: string): Promise<string> {
   let detail: any
   try {
-    detail = ((await res.json()) as any)?.detail
+    const body = (await res.json()) as any
+    // 网关现在按 OpenAI 线格式回 `error`(dsh 主通道 adapter 只认这个键),
+    // 同时保留 `detail` 兼容存量客户端。两个都读,谁在用谁。
+    detail = body?.error ?? body?.detail
   } catch {
     /* 非 JSON */
   }
@@ -65,12 +69,34 @@ export function apply(ctx: Context, config: Config): void {
         properties: {
           path: { type: 'string', required: true },
           bytes: { type: 'integer', required: true },
+          // 存进 attachments 后的引用;有它才能在对话里**内联渲染**出这张图。
+          image: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              attachmentId: { type: 'string', required: true },
+              mediaType: { type: 'string', required: true },
+              bytes: { type: 'integer', required: true },
+              width: { type: 'integer', required: true },
+              height: { type: 'integer', required: true },
+              name: { type: 'string' },
+            },
+          },
         },
       },
-      render: (_args: any, value: any) => [{
-        type: 'text',
-        text: `已生成图片:${value.path}(${value.bytes} 字节)。可在右侧文件区打开预览。`,
-      }],
+      render: (_args: any, value: any) => {
+        const text = {
+          type: 'text',
+          // 顺手告诉模型「怎么看这张图」:主模型不收图,read_file 读 PNG 会被 dsh 硬拒
+          // (adapter 把整个 DeepSeek provider 声明成 inputModalities:['text'])。
+          // 实测中模型画完图第一反应就是 read_file,然后撞一堵它看不懂的墙。
+          text: `已生成图片:${value.path}(${value.bytes} 字节)。`
+            + `需要确认画面内容请用 describe_image(直接 read_file 读图会被拒)。`,
+        }
+        // 带上 image 块 → 图**直接显示在对话里**,而不是只留一句"去文件区自己点开"。
+        // dsh 的 read_image 就是这么回的(packages/fs/tool-fs/src/read-image.ts:117)。
+        return value.image === undefined ? [text] : [text, { type: 'image', attachment: value.image }]
+      },
     },
     async execute(args: any, exec: any) {
       const res = await fetch(config.endpoint, {
@@ -90,7 +116,20 @@ export function apply(ctx: Context, config: Config): void {
       const abs = (ctx as any).fs.processPath(target)
       await mkdir(dirname(abs), { recursive: true }).catch(() => {})
       await writeFile(abs, bytes, { signal: exec.signal })
-      return { path: target.displayPath, bytes: bytes.byteLength }
+
+      // 同时存一份进 attachments,拿到引用后就能在对话里内联渲染。
+      // 失败不算生图失败 —— 文件已经写好了,退回"只给路径"就是原来的行为。
+      let image: unknown
+      try {
+        const store = (ctx as any).attachments
+        if (store !== undefined) {
+          image = await store.saveImage({
+            data: bytes, mediaType: 'image/png', name: relPath.split('/').pop(),
+          })
+        }
+      } catch { /* 超出附件尺寸限制等 —— 降级成纯文本结果 */ }
+      return { path: target.displayPath, bytes: bytes.byteLength,
+               ...(image === undefined ? {} : { image }) }
     },
   }))
 }

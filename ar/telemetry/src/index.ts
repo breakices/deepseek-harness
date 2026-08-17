@@ -32,6 +32,13 @@ export const Config: z<Config> = z.object({
   token: z.string().required(),
 })
 
+/** 单批上限,与服务端 store.MAX_EVENTS_PER_REQUEST 对齐(超了整批 413)。 */
+const MAX_BATCH = 200
+/** 队列硬上限:云端不可达时不能无限吃设备内存;超了丢最旧的。 */
+const MAX_QUEUE = 5000
+const MAX_RETRY = 3
+const RETRY_BASE_MS = 500
+
 /** 把 ledger record 映射成 agent_telemetry 约定的事件行。 */
 function toEvent(r: SessionTelemetryRecord): Record<string, unknown> {
   return {
@@ -72,21 +79,46 @@ export class ArTelemetryBackend extends SessionTelemetryBackend {
     this.draining = true
     try {
       while (this.queue.length > 0) {
-        const batch = this.queue.splice(0, this.queue.length)
+        // 服务端单次上限 500 条(agent_telemetry/store.py MAX_EVENTS_PER_REQUEST);
+        // 超了整批 413,所以这里切片而不是一次性 splice 全部。
+        const batch = this.queue.splice(0, MAX_BATCH)
         const events = batch.map(toEvent)
-        try {
-          await fetch(this.endpoint, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', authorization: `Bearer ${this.token}` },
-            body: JSON.stringify({ events }),
-          })
-        } catch {
-          // spike: 丢弃失败批。真实形态: 重试 + 用服务端回传水位补传(readFrom by seq)。
+        if (!(await this.post(events))) {
+          // 送不出去就还回队头,保住顺序;队列有硬上限,超了丢**最旧**的
+          // ——轨迹是补充信息,不能为了它把设备内存吃光。
+          this.queue.unshift(...batch)
+          if (this.queue.length > MAX_QUEUE) this.queue.splice(0, this.queue.length - MAX_QUEUE)
+          return   // 本轮退出;下一次 emit 再试(避免在这里空转烧 CPU)
         }
       }
     } finally {
       this.draining = false
     }
+  }
+
+  /**
+   * 送一批,带有限重试。返回 true=已投递(或**服务端明确拒绝**,重试也没用)。
+   *
+   * 原实现是 `catch {}` 直接丢批 —— 云端轨迹因此是有损的,既不能当回看真相,
+   * 也不能当计费争议的证据。这里区分两类失败:
+   *   • 网络/5xx/429 → 退避重试(次数有限,失败后回队列等下次)
+   *   • 4xx(除 429)→ 服务端明确拒绝(如批过大、会话不属于本账户),重试无意义,丢弃
+   */
+  private async post(events: readonly Record<string, unknown>[], attempt = 0): Promise<boolean> {
+    try {
+      const res = await fetch(this.endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.token}` },
+        body: JSON.stringify({ events }),
+      })
+      if (res.ok) return true
+      if (res.status >= 400 && res.status < 500 && res.status !== 429) return true  // 明确拒绝
+    } catch {
+      // 网络不可达 —— 落到下面的退避
+    }
+    if (attempt >= MAX_RETRY) return false
+    await new Promise((r) => setTimeout(r, RETRY_BASE_MS * 2 ** attempt))
+    return this.post(events, attempt + 1)
   }
 
   async shutdown(): Promise<void> {

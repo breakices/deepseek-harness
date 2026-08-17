@@ -51,7 +51,10 @@ const REVIEWER_SYSTEM = [
 async function describeError(res: Response, what: string): Promise<string> {
   let detail: any
   try {
-    detail = ((await res.json()) as any)?.detail
+    const body = (await res.json()) as any
+    // 网关现在按 OpenAI 线格式回 `error`(dsh 主通道 adapter 只认这个键),
+    // 同时保留 `detail` 兼容存量客户端。两个都读,谁在用谁。
+    detail = body?.error ?? body?.detail
   } catch {
     /* 非 JSON */
   }
