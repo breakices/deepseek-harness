@@ -46,7 +46,15 @@ worktrees/
 .dsh-home/*.log
 .dsh-home/*.bak
 .dsh-home/.trace-spike/
+# 注意前导点:实际文件名是 .credentials.yaml，`credentials*` 匹配不到它。
 .dsh-home/credentials*
+.dsh-home/.credentials*
+# 运行期状态（本机 profile/技能缓存/会话缓存/匿名 id）—— 与机密同域，一律不入库。
+.dsh-home/settings.yaml
+.dsh-home/profiles/
+.dsh-home/storages/
+.dsh-home/skills/
+.dsh-home/.anonymous-user-id
 generated/
 
 dist/
