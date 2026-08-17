@@ -17,6 +17,11 @@
       name: '@deepseek-ai/dsh-host-directory-picker-browse'
     - id: ui-directory-picker-browse
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+# 工作区文件树 + 文件预览。**上游 npm 没有这个包**(实测 404)—— 它是我们 fork 分支上的
+# 贡献,上游不收外部 PR,所以分发包装的 dsh 里一直没有它,上面那对 directory-picker
+# 也就一直是给一个缺席的主角铺路。现在随包发我们自己打的版本(node 半 + 浏览器半)。
+    - id: ui-file-tree
+      name: '@deepseek-ai/dsh-client-ui-file-tree'
 
 # 接线①: 主 LLM 通道换轨到 AR agent_gateway 代理。
 # adapter 把 apiKeyEnv(AR_DEVICE_TOKEN 环境变量)解析出的设备 token 当 Bearer 发给

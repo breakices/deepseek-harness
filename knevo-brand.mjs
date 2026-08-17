@@ -22,6 +22,21 @@
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+/**
+ * 写文件前**先断开硬链接**。
+ *
+ * pnpm 默认把包从全局 store **硬链接**进 `node_modules/.pnpm/`（实测某个预设文件
+ * 的链接数是 11）。直接 `writeFileSync` 会穿透硬链接改到 **store 里那一份**，
+ * 于是这台机器上任何别的项目、只要装了同一版本的 dsh，都会跟着变成 Knevo 的人格 ——
+ * 我们无权修改用户机器上与本产品无关的东西。
+ *
+ * 先 unlink 再写 = 新建 inode，只影响本安装目录。
+ */
+function writeDetached(file, content) {
+  try { rmSync(file) } catch { /* 不存在就直接写 */ }
+  writeFileSync(file, content)
+}
+
 const BRAND_TITLE = 'Knevo'
 const SLOGAN = '知无涯'
 
@@ -128,7 +143,7 @@ function patchPreset(dir, id, spec) {
       }
     }
   }
-  if (changed) writeFileSync(yml, src)
+  if (changed) writeDetached(yml, src)
 
   // **不改模式名与描述**:模式名是 dsh 的执行策略词汇(标准/PTC/极简),不是品牌,
   //   保留它反而更准确;而且实测内置预设的显示名不走 preset.yml,改了界面也不变。
@@ -173,7 +188,7 @@ const root = process.cwd()
     for (const [from, to] of TEXT_REPLACEMENTS) {
       if (src.includes(from)) { src = src.replaceAll(from, to); hit = true }
     }
-    if (hit) { writeFileSync(f, src); changed++ }
+    if (hit) { writeDetached(f, src); changed++ }
   }
   if (files.length === 0) console.log('[brand] 未找到 ui-conversation 副本，跳过标语')
   else if (changed === 0 && already === 0) {

@@ -126,9 +126,10 @@ function smokeClientBundle(file, id) {
     window: { __ModuleLoader__: { load: (m) => { captured = m } } },
     // 平台模块由 shell 注入;这里给个够用的替身,只要 factory 不去调用它们的内部实现。
     require: (spec) => {
-      if (spec === 'react' || spec === 'react/jsx-runtime') {
-        return new Proxy(() => {}, { get: () => () => {} })
-      }
+      // 平台模块 + runtime store 例外都由壳提供,这里给个通用替身即可;
+      // require 到**不在这份清单里**的模块才是真问题(运行期会白屏)。
+      const allowed = [...PLATFORM_MODULES, '@deepseek-ai/dsh-client-runtime/client']
+      if (allowed.includes(spec)) return new Proxy(() => {}, { get: () => () => {} })
       throw new Error(`浏览器半边 require 了未 seed 的模块: ${spec}`)
     },
   }
@@ -145,6 +146,58 @@ function smokeClientBundle(file, id) {
       + `模块级 inject 会被忽略`)
   }
   console.log(`  [smoke] ${id} 浏览器半边可执行(导出 ${Object.keys(mod).join(', ')})`)
+}
+
+/**
+ * esbuild 版的 CSS Modules 处理,**逐字对齐上游 tsdown 的做法**
+ * (packages/client/tsdown.client.ts 的 `dsh-css-modules-inline`)。
+ *
+ * 上游用 lightningcss 把 `.module.css` 转成「类名映射 + 自注入 <style>」的 JS 模块。
+ * 类名 pattern 必须是 `[hash]_[local]` —— 与 CSS 里生成的选择器一致,错了就是样式全丢。
+ * esbuild 原生的 local-css 会另出一个 .css 文件,而 client 插件只能是**单个自注册 JS**,
+ * 所以必须自己转。
+ *
+ * @param {string} id 插件 id(写进 style 标签的 data 属性,便于排查)
+ */
+function cssModulesPlugin(id) {
+  const NS = 'knevo-css-module'
+  return {
+    name: 'knevo-css-modules-inline',
+    setup(build) {
+      build.onResolve({ filter: /\.module\.css$/ }, (args) => ({
+        path: join(args.resolveDir, args.path),
+        namespace: NS,
+      }))
+      build.onLoad({ filter: /.*/, namespace: NS }, (args) => {
+        const { transform } = require(join(_pnpm, readdirSync(_pnpm).find((d) => d.startsWith('lightningcss@')),
+          'node_modules', 'lightningcss'))
+        const { code, exports: cssExports } = transform({
+          filename: args.path,
+          code: readFileSync(args.path),
+          cssModules: { pattern: '[hash]_[local]' },
+          minify: true,
+        })
+        const classMap = {}
+        for (const [local, exp] of Object.entries(cssExports ?? {})) classMap[local] = exp.name
+        const tagId = `${id}/${args.path.split(/[\\/]/).pop()}`
+        return {
+          loader: 'js',
+          contents: [
+            `const css = ${JSON.stringify(code.toString())};`,
+            `const tagId = ${JSON.stringify(tagId)};`,
+            "if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css=' + JSON.stringify(tagId) + ']') === null) {",
+            "  const tag = document.createElement('style');",
+            `  tag.dataset.plugin = ${JSON.stringify(id)};`,
+            '  tag.dataset.pluginCss = tagId;',
+            '  tag.textContent = css;',
+            '  document.head.appendChild(tag);',
+            '}',
+            `export default ${JSON.stringify(classMap)};`,
+          ].join('\n'),
+        }
+      })
+    },
+  }
 }
 
 const OUT = join(ROOT, 'dist', `knevo-ar-${VERSION}`)
@@ -200,6 +253,44 @@ for (const p of PLUGINS) {
   writeFileSync(join(outDir, 'package.json'), JSON.stringify(pkg, null, 2))
   fileDeps[name] = `file:./plugins/${p}`
   if (UI_PLUGINS[p] === undefined) console.log(`  [bundle] ${name}`)
+}
+
+// 1.5) 工作区文件树 —— **fork 独有,npm 上没有**(实测 404),所以分发包装的上游 dsh 里
+//   根本没有它;profile 里那对 directory-picker-browse 就是为它铺的路,却一直缺主角。
+//   现在有了浏览器半边的打包管线,把它当作随包插件发出去。
+//   它的 client 半 import 了 CSS Modules 与 `dsh-client-runtime/client`(后者是上游
+//   CLIENT_EXTERNALS 里唯一的额外例外:snapshot-store 引擎必须共用同一份)。
+{
+  const src = join(ROOT, 'packages', 'client', 'ui-file-tree')
+  const name = JSON.parse(readFileSync(join(src, 'package.json'), 'utf8')).name
+  const outDir = join(OUT, 'plugins', 'ui-file-tree')
+  mkdirSync(outDir, { recursive: true })
+  await build({
+    entryPoints: [join(src, 'src', 'index.ts')],
+    outfile: join(outDir, 'index.js'),
+    bundle: true, format: 'esm', platform: 'node', target: 'node22',
+    external: ['@deepseek-ai/*', 'node:*'], logLevel: 'warning',
+  })
+  await build({
+    entryPoints: [join(src, 'src', 'client', 'index.ts')],
+    outfile: join(outDir, 'client.js'),
+    bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', jsx: 'automatic',
+    // 平台模块 + runtime store 例外(逐字对齐上游 CLIENT_EXTERNALS)
+    external: [...PLATFORM_MODULES, '@deepseek-ai/dsh-client-runtime/client'],
+    plugins: [cssModulesPlugin(name)],
+    banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(name)}, factory: (require) => {`
+      + ' var module = { exports: {} }; var exports = module.exports;' },
+    footer: { js: 'return module.exports; } });' },
+    logLevel: 'warning',
+  })
+  writeFileSync(join(outDir, 'package.json'), JSON.stringify({
+    name, version: VERSION, private: true, type: 'module',
+    exports: { '.': './index.js', './client': './client.js', './package.json': './package.json' },
+    dsh: { client: { platform: 'web' } },
+  }, null, 2))
+  smokeClientBundle(join(outDir, 'client.js'), name)
+  fileDeps[name] = 'file:./plugins/ui-file-tree'
+  console.log(`  [bundle] ${name} (工作区文件树,fork 独有)`)
 }
 
 // 2) 顶层 package.json:依赖 dsh + 各插件
