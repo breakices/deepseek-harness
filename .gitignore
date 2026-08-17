@@ -61,3 +61,6 @@ dist/
 .knevo-releases/
 
 .fe-cache/
+
+# 改启动器时 shell 转义事故留下的 0 字节文件,别再让它进来
+"24)){console.error('Knevo"
