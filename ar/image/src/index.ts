@@ -88,19 +88,24 @@ export function apply(ctx: Context, config: Config): void {
           },
         },
       },
-      render: (_args: any, value: any) => {
-        const text = {
-          type: 'text',
-          // 顺手告诉模型「怎么看这张图」:主模型不收图,read_file 读 PNG 会被 dsh 硬拒
-          // (adapter 把整个 DeepSeek provider 声明成 inputModalities:['text'])。
-          // 实测中模型画完图第一反应就是 read_file,然后撞一堵它看不懂的墙。
-          text: `已生成图片:${value.path}(${value.bytes} 字节)。`
-            + `需要确认画面内容请用 describe_image(直接 read_file 读图会被拒)。`,
-        }
-        // 带上 image 块 → 图**直接显示在对话里**,而不是只留一句"去文件区自己点开"。
-        // dsh 的 read_image 就是这么回的(packages/fs/tool-fs/src/read-image.ts:117)。
-        return value.image === undefined ? [text] : [text, { type: 'image', attachment: value.image }]
-      },
+      // ★★ 绝对不要在这里回 `{type:'image'}` 块 ★★
+      //
+      // 我试过（0.4.x）：回 image 块确实能让图内联显示在对话里，但**它会进会话历史**，
+      // 而历史在下一轮要序列化给 DeepSeek —— `llm-deepseek/src/serialize.ts:66` 的
+      // `assertTextOnly` 见到 image 块直接抛 `UNSUPPORTED_CONTENT`。
+      // 后果不是"这次失败"，而是**整个会话从此报废**：此后每一轮都在序列化同一段历史时炸，
+      // 用户只能新开会话（2026-08-17 实测，用户会话被我这个改动搞死）。
+      //
+      // dsh 自己的 read_image 能回 image 块，是因为它有一道能力闸：模型不声明
+      // inputModalities 含 image 就直接拒绝调用。我们的主模型是纯文本的，没有这个前提。
+      //
+      // 看图的正路有两条：右侧**工作区文件树**点开预览（0.6.0 起随包发），
+      // 模型要"看懂"内容则用 `describe_image`（走云端 vision provider 转文字）。
+      render: (_args: any, value: any) => [{
+        type: 'text',
+        text: `已生成图片:${value.path}(${value.bytes} 字节)。可在右侧文件区打开预览;`
+          + `需要确认画面内容请用 describe_image(直接 read_file 读图会被拒)。`,
+      }],
     },
     async execute(args: any, exec: any) {
       const res = await fetch(config.endpoint, {

@@ -13,8 +13,12 @@
  * @module @knevo/dsh-ar-skills-remote
  */
 
+import { writeFile, mkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-fs'
 import type {
   SkillCandidate,
   SkillDefinition,
@@ -24,7 +28,7 @@ import type {
 } from '@deepseek-ai/dsh-skill'
 
 export const name = 'ar-skills-remote'
-export const inject = ['skills']
+export const inject = ['skills', 'tools', 'fs']
 
 const AR_SKILL_RANK = 550 // 低者胜重名;远程档,略高于 filesystem 若共存
 
@@ -117,4 +121,75 @@ const AR_RESOURCE_BASE = {
 
 export function apply(ctx: Context, config: Config): void {
   ctx.skills.registerProvider((control) => new RemoteSkillProvider(config, control))
+
+  const base = config.baseUrl.replace(/\/$/, '')
+  const headers = { authorization: `Bearer ${config.token}` }
+
+  // 技能带的子资源。**两类待遇不同,判据是「谁消费它」**:
+  //   • 脚本(.py/.sh/...)—— 消费者是本机解释器,网关回原文,这里写进工作区让模型 bash 跑;
+  //   • 知识(.md 规范/清单)—— 消费者是模型,网关只回占位符,由网关转发前注入,不落设备。
+  // 所以同一个工具,拿到 script 就落盘、拿到 knowledge 就把占位符当文本回给模型。
+  ctx.tools.register(defineTool({
+    name: 'fetch_skill_file',
+    description:
+      '取技能自带的资源文件。技能正文里让你「运行 xxx.py」或「按 xxx.md 的规范」时用。'
+      + '脚本会被写进工作区并返回路径(直接用 bash 运行它,不要自己重写);'
+      + '规范类文件会直接返回内容。先用 list=true 看这个技能带了哪些文件。',
+    parameters: {
+      skill: { type: 'string', required: true, description: '技能名(与 skill 工具里的一致)。' },
+      path: { type: 'string', description: '资源相对路径,如 reference/run_self_audit.py。list=true 时不用给。' },
+      list: { type: 'boolean', description: '只列清单,不取内容。' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          skill: { type: 'string', required: true },
+          listing: { type: 'string' },
+          path: { type: 'string' },
+          kind: { type: 'string' },
+          saved_to: { type: 'string' },
+          content: { type: 'string' },
+        },
+      },
+      render: (_a: any, v: any) => [{
+        type: 'text',
+        text: v.listing !== undefined
+          ? `技能 ${v.skill} 的资源文件:
+${v.listing}`
+          : v.saved_to !== undefined
+            ? `已保存到 ${v.saved_to}(脚本,直接用 bash 运行,不要重写它)。`
+            : `${v.path}:
+${v.content}`,
+      }],
+    },
+    async execute(args: any, exec: any) {
+      const skill = String(args.skill || '')
+      if (args.list === true || !args.path) {
+        const res = await fetch(`${base}/skills/${encodeURIComponent(skill)}/files`, { headers, signal: exec.signal })
+        if (!res.ok) throw new Error(`列技能资源失败:HTTP ${res.status}`)
+        const data = (await res.json()) as { files?: { path: string; kind: string; bytes: number }[] }
+        const listing = (data.files || []).map((f) => `  ${f.kind === 'script' ? '[脚本]' : '[规范]'} ${f.path}`).join('\n')
+        return { skill, listing: listing || '(无)' }
+      }
+      const rel = String(args.path)
+      const res = await fetch(
+        `${base}/skills/${encodeURIComponent(skill)}/file?path=${encodeURIComponent(rel)}`,
+        { headers, signal: exec.signal })
+      if (!res.ok) throw new Error(`取技能资源失败:HTTP ${res.status}`)
+      const data = (await res.json()) as { path: string; kind: string; content: string }
+      if (data.kind !== 'script') {
+        // 知识类:回来的是占位符,网关转发时注入真内容 —— 不落设备磁盘
+        return { skill, path: data.path, kind: data.kind, content: data.content }
+      }
+      const target = await (ctx as any).fs.resolve(`.knevo/skills/${skill}/${rel}`, {
+        cwd: exec.agent?.session?.header?.cwd, signal: exec.signal,
+      })
+      const abs = (ctx as any).fs.processPath(target)
+      await mkdir(dirname(abs), { recursive: true }).catch(() => {})
+      await writeFile(abs, data.content, { signal: exec.signal })
+      return { skill, path: data.path, kind: 'script', saved_to: target.displayPath }
+    },
+  }))
 }

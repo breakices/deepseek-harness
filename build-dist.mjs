@@ -255,43 +255,9 @@ for (const p of PLUGINS) {
   if (UI_PLUGINS[p] === undefined) console.log(`  [bundle] ${name}`)
 }
 
-// 1.5) 工作区文件树 —— **fork 独有,npm 上没有**(实测 404),所以分发包装的上游 dsh 里
-//   根本没有它;profile 里那对 directory-picker-browse 就是为它铺的路,却一直缺主角。
-//   现在有了浏览器半边的打包管线,把它当作随包插件发出去。
-//   它的 client 半 import 了 CSS Modules 与 `dsh-client-runtime/client`(后者是上游
-//   CLIENT_EXTERNALS 里唯一的额外例外:snapshot-store 引擎必须共用同一份)。
-{
-  const src = join(ROOT, 'packages', 'client', 'ui-file-tree')
-  const name = JSON.parse(readFileSync(join(src, 'package.json'), 'utf8')).name
-  const outDir = join(OUT, 'plugins', 'ui-file-tree')
-  mkdirSync(outDir, { recursive: true })
-  await build({
-    entryPoints: [join(src, 'src', 'index.ts')],
-    outfile: join(outDir, 'index.js'),
-    bundle: true, format: 'esm', platform: 'node', target: 'node22',
-    external: ['@deepseek-ai/*', 'node:*'], logLevel: 'warning',
-  })
-  await build({
-    entryPoints: [join(src, 'src', 'client', 'index.ts')],
-    outfile: join(outDir, 'client.js'),
-    bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', jsx: 'automatic',
-    // 平台模块 + runtime store 例外(逐字对齐上游 CLIENT_EXTERNALS)
-    external: [...PLATFORM_MODULES, '@deepseek-ai/dsh-client-runtime/client'],
-    plugins: [cssModulesPlugin(name)],
-    banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(name)}, factory: (require) => {`
-      + ' var module = { exports: {} }; var exports = module.exports;' },
-    footer: { js: 'return module.exports; } });' },
-    logLevel: 'warning',
-  })
-  writeFileSync(join(outDir, 'package.json'), JSON.stringify({
-    name, version: VERSION, private: true, type: 'module',
-    exports: { '.': './index.js', './client': './client.js', './package.json': './package.json' },
-    dsh: { client: { platform: 'web' } },
-  }, null, 2))
-  smokeClientBundle(join(outDir, 'client.js'), name)
-  fileDeps[name] = 'file:./plugins/ui-file-tree'
-  console.log(`  [bundle] ${name} (工作区文件树,fork 独有)`)
-}
+// 1.5) 工作区文件树:**暂不随包发**。它依赖 fork 独有的 host.readFile,而发行版
+//   @deepseek-ai/dsh-host-apiproxy@rc.6 里那个方法根本不存在(实测 readFile 出现 0 次),
+//   打进去也只是个列不出文件、预览不了图的空壳。恢复它要先把取字节改到 /knevo 通道。
 
 // 2) 顶层 package.json:依赖 dsh + 各插件
 writeFileSync(join(OUT, 'package.json'), JSON.stringify({

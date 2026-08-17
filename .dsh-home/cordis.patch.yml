@@ -17,11 +17,12 @@
       name: '@deepseek-ai/dsh-host-directory-picker-browse'
     - id: ui-directory-picker-browse
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
-# 工作区文件树 + 文件预览。**上游 npm 没有这个包**(实测 404)—— 它是我们 fork 分支上的
-# 贡献,上游不收外部 PR,所以分发包装的 dsh 里一直没有它,上面那对 directory-picker
-# 也就一直是给一个缺席的主角铺路。现在随包发我们自己打的版本(node 半 + 浏览器半)。
-    - id: ui-file-tree
-      name: '@deepseek-ai/dsh-client-ui-file-tree'
+# 工作区文件树**暂不挂载**(0.6.0 挂过,是坏的,0.7.0 摘掉)。
+# 它的客户端调 `ctx.workspaces.readFile → host.readFile`,而那条**主机侧 API 是 fork 独有的**
+# (那次贡献上游没收):实测发行版 @deepseek-ai/dsh-host-apiproxy@0.1.0-rc.6 与
+# dsh-client-runtime@0.1.0-rc.6 里 `readFile` 出现 **0 次**。所以面板装上了也列不出文件、
+# 预览不了图 —— 留着比没有更误导。
+# 要恢复它,得改成走我们自己的 /knevo loopback 通道取字节(与 ar-image 的内联预览同一条)。
 
 # 接线①: 主 LLM 通道换轨到 AR agent_gateway 代理。
 # adapter 把 apiKeyEnv(AR_DEVICE_TOKEN 环境变量)解析出的设备 token 当 Bearer 发给
