@@ -140,4 +140,8 @@ export function apply(ctx: Context, config: Config): void {
   }, 'ar-ui-account: /knevo rpc channel')
 }
 
-export default apply
+// ★不要加 `export default apply`。cordis 的 loader 见到 default 导出就把**那个函数**
+//   当插件,而函数插件的 inject 要挂在函数属性上 —— 模块级的 `export const inject`
+//   会被整个忽略,运行期报 `cannot get property "x" without inject` 并让整棵插件树
+//   boot 失败(2026-08-17 实测:macOS 上客户端直接起不来)。其余 9 个 @knevo 插件
+//   都是 inject + apply、无 default —— 保持一致。

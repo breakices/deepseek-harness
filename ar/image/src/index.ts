@@ -18,8 +18,12 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-fs'
 
 export const name = 'ar-image'
-// attachments 是可选依赖:有它才能把生成的图内联渲染进对话(没有就只回路径)。
-export const inject = { required: ['tools', 'fs'], optional: ['attachments'] }
+// ★inject 只能是**数组**或「服务名 → 配置」映射(vendor/cordis/src/registry.ts:296)。
+//   这版 cordis **没有可选注入**:写成 {required:[...], optional:[...]} 会被当成两个
+//   分别叫 required / optional 的服务去等,插件永远 pending、整棵树 boot 失败
+//   (2026-08-17 实测)。attachments 由 base bundle 提供(与本插件同在 host 层),
+//   声明成必需是安全的 —— 有它才能把生成的图内联渲染进对话。
+export const inject = ['tools', 'fs', 'attachments']
 
 export interface Config {
   /** 生图端点,如 http://localhost:8000/api/agent/v1/images */
