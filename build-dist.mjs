@@ -67,6 +67,46 @@ const PLATFORM_MODULES = [
   '@deepseek-ai/dsh-client-schema-form',
 ]
 
+/**
+ * 构建期冒烟:用最小宿主执行浏览器半边的自注册脚本,验证 factory 真能跑出插件对象。
+ *
+ * 为什么要有这道闸 —— 2026-08-17 一天之内栽了两次,**两次都是"产物形状看着对、一执行就炸"**:
+ *   1. 多了 `export default apply` → cordis 把默认导出当插件,模块级 inject 被忽略;
+ *   2. 缺 `var module = {...}` → 浏览器端 `module is not defined`,整个 UI 停在
+ *      Failed to load plugins。
+ * 两次都是发出去之后才由用户撞到。执行一遍只要几毫秒,没有理由不做。
+ *
+ * @param {string} file  client.js 路径
+ * @param {string} id    期望的插件 id(与 banner 里的一致)
+ */
+function smokeClientBundle(file, id) {
+  const src = readFileSync(file, 'utf8')
+  let captured
+  const sandbox = {
+    window: { __ModuleLoader__: { load: (m) => { captured = m } } },
+    // 平台模块由 shell 注入;这里给个够用的替身,只要 factory 不去调用它们的内部实现。
+    require: (spec) => {
+      if (spec === 'react' || spec === 'react/jsx-runtime') {
+        return new Proxy(() => {}, { get: () => () => {} })
+      }
+      throw new Error(`浏览器半边 require 了未 seed 的模块: ${spec}`)
+    },
+  }
+  const fn = new Function('window', 'require', `${src}\nreturn window.__ModuleLoader__;`)
+  fn(sandbox.window, sandbox.require)
+  if (captured === undefined) throw new Error(`[build] ${id}: client.js 没有自注册(banner/footer 契约不对)`)
+  if (captured.id !== id) throw new Error(`[build] ${id}: 自注册 id 不符,拿到 ${captured.id}`)
+  const mod = captured.factory(sandbox.require)      // ← 真跑一遍,module 未定义会在这里炸
+  if (typeof mod?.apply !== 'function') {
+    throw new Error(`[build] ${id}: factory 没有导出 apply(拿到 ${Object.keys(mod ?? {}).join(',') || '空'})`)
+  }
+  if (mod.default !== undefined) {
+    throw new Error(`[build] ${id}: 浏览器半边**不能有 default 导出** —— cordis 会把它当插件,`
+      + `模块级 inject 会被忽略`)
+  }
+  console.log(`  [smoke] ${id} 浏览器半边可执行(导出 ${Object.keys(mod).join(', ')})`)
+}
+
 const OUT = join(ROOT, 'dist', `knevo-ar-${VERSION}`)
 console.log(`[build] 版本 ${VERSION} → ${OUT}`)
 rmSync(join(ROOT, 'dist'), { recursive: true, force: true })
@@ -100,11 +140,19 @@ for (const p of PLUGINS) {
       bundle: true, format: 'cjs', platform: 'browser', target: 'es2022',
       jsx: 'automatic',
       external: PLATFORM_MODULES,
-      banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(name)}, factory: (require) => {` },
+      // ★banner 末尾那两个 var 是**必需**的(等价上游 tsdown.client.ts 的 `intro`)。
+      //   esbuild 的 CJS 产物只是**使用** module/exports,假设宿主提供;这里的宿主是
+      //   一个普通箭头函数体,不提供。少了它们,浏览器端报
+      //   `module is not defined` → 整个 UI 停在 Failed to load plugins(2026-08-17 实测)。
+      banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(name)}, factory: (require) => {`
+        + ' var module = { exports: {} }; var exports = module.exports;' },
       footer: { js: 'return module.exports; } });' },
-      // esbuild 的 CJS 产物自带 module/exports 声明,不需要上游那条 intro。
       logLevel: 'warning',
     })
+    // 构建期冒烟:**真的把 factory 跑一遍**。产物形状看着对但一执行就炸,是这轮踩了两次的坑
+    // (default 导出吞掉 inject、module 未定义)。这里用一个最小宿主执行它,拿不到
+    // apply/inject 就让构建失败 —— 比发出去让用户撞好。
+    smokeClientBundle(join(outDir, 'client.js'), name)
     pkg.exports['./client'] = './client.js'
     pkg.dsh = { client: { platform: 'web' } }
     console.log(`  [bundle] ${name} (含浏览器半边)`)
